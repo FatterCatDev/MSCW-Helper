@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { Rnd } from 'react-rnd';
 import { WIDGET_LABELS } from '../../../shared/defaults.ts';
 import { bossNextAt, dailyKey, nextScheduled } from '../../../shared/time.ts';
-import { WIDGET_TYPES, type AppState, type Placement, type WidgetDef, type WidgetType } from '../../../shared/types.ts';
+import { WIDGET_TYPES, type AppState, type Placement, type PotionStatus, type WidgetDef, type WidgetType } from '../../../shared/types.ts';
 import { beep, useAppState, useNow, type Dispatch } from '../common/state.ts';
 import { WidgetContent } from '../widgets/index.tsx';
 
@@ -114,7 +114,7 @@ function useAlerts(state: AppState | null, dispatch: Dispatch, now: number): voi
   }, [now, state, dispatch]);
 }
 
-function WidgetFrame(props: { w: WidgetDef; p: Placement; z: number; edit: boolean; dispatch: Dispatch; now: number }): ReactNode {
+function WidgetFrame(props: { w: WidgetDef; p: Placement; z: number; edit: boolean; dispatch: Dispatch; now: number; potionStatus: PotionStatus | undefined }): ReactNode {
   const { w, p, z, edit, dispatch, now } = props;
   return (
     <Rnd
@@ -151,7 +151,7 @@ function WidgetFrame(props: { w: WidgetDef; p: Placement; z: number; edit: boole
           )}
         </div>
         <div className="widget-content" style={{ zoom: p.scale }}>
-          <WidgetContent w={w} dispatch={dispatch} now={now} />
+          <WidgetContent w={w} dispatch={dispatch} now={now} potionStatus={props.potionStatus} />
         </div>
         {edit && <div className="edit-shield" />}
       </div>
@@ -220,13 +220,17 @@ export function OverlayApp(): ReactNode {
 
   return (
     <div className={`overlay-root ${edit ? 'edit' : ''}`}>
+      {state.settings.gameTracking.sourceId && <div className="capture-fps">
+        Capture: {state.runtime.gameTracking.fps.toFixed(1)} / 30 FPS
+        {!state.runtime.gameTracking.running && ' (stopped)'}
+      </div>}
       {edit && <EditToolbar state={state} dispatch={dispatch} />}
       {profile &&
         state.widgetOrder.map((id, i) => {
           const w = state.widgets[id];
           const p = profile.placements[id];
           if (!w || !p?.visible) return null;
-          return <WidgetFrame key={id} w={w} p={p} z={i + 1} edit={edit} dispatch={dispatch} now={now} />;
+          return <WidgetFrame key={id} w={w} p={p} z={i + 1} edit={edit} dispatch={dispatch} now={now} potionStatus={state.runtime.potionTracking[id]} />;
         })}
     </div>
   );

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { imageUrl } from '../../../shared/ipc.ts';
-import { HOUR, formatDuration } from '../../../shared/time.ts';
-import { EntryInput, Stat, type WidgetProps } from './common.tsx';
+import { EntryInput, type WidgetProps } from './common.tsx';
 
 export function NotesWidget({ w, dispatch }: WidgetProps<'notes'>): ReactNode {
   const { items, text } = w.data;
@@ -60,40 +59,6 @@ function NotesText({ text, onCommit }: { text: string; onCommit: (text: string) 
       }}
       onKeyDown={(e) => e.key === 'Escape' && e.currentTarget.blur()}
     />
-  );
-}
-
-export function KillsWidget({ w, dispatch, now }: WidgetProps<'kills'>): ReactNode {
-  const { count, startedAt } = w.data;
-  const { goal, hotkey, label } = w.config;
-  const elapsed = startedAt ? now - startedAt : 0;
-  const perHour = elapsed > 60_000 ? (count / elapsed) * HOUR : null;
-  return (
-    <div className="widget-body">
-      <div className="big">
-        {count.toLocaleString()}
-        {goal > 0 && <span className="dim"> / {goal.toLocaleString()}</span>}
-        <span className="hint big-label"> {label}</span>
-      </div>
-      {goal > 0 && (
-        <div className="bar">
-          <div className={`bar-fill ${count >= goal ? 'complete' : ''}`} style={{ width: `${Math.min(100, (count / goal) * 100)}%` }} />
-        </div>
-      )}
-      <div className="stats">
-        <Stat label="Per hour" value={perHour === null ? '—' : Math.round(perHour).toLocaleString()} />
-        <Stat label="Time" value={startedAt ? formatDuration(elapsed, true) : '—'} />
-      </div>
-      <div className="row">
-        <button onClick={() => dispatch({ type: 'kills/add', id: w.id, delta: 1, at: Date.now() })}>+1 {hotkey && <kbd>{hotkey}</kbd>}</button>
-        <button className="ghost" onClick={() => dispatch({ type: 'kills/add', id: w.id, delta: -1, at: Date.now() })}>
-          −1
-        </button>
-        <button className="ghost" onClick={() => dispatch({ type: 'kills/reset', id: w.id })}>
-          Reset
-        </button>
-      </div>
-    </div>
   );
 }
 

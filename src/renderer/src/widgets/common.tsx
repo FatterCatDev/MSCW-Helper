@@ -1,11 +1,12 @@
 import { useState, type ReactNode } from 'react';
-import type { WidgetDef, WidgetType } from '../../../shared/types.ts';
+import type { PotionStatus, WidgetDef, WidgetType } from '../../../shared/types.ts';
 import type { Dispatch } from '../common/state.ts';
 
 export interface WidgetProps<T extends WidgetType> {
   w: WidgetDef<T>;
   dispatch: Dispatch;
   now: number;
+  potionStatus?: PotionStatus | undefined;
 }
 
 /** Single-line input that submits on Enter and releases focus back afterwards. */

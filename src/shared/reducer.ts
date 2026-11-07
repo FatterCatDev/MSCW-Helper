@@ -1,6 +1,8 @@
 import type { HotkeyAction, Placement, PersistedState, Settings, WidgetDef, WidgetType } from './types.ts';
 import { HOTKEY_ACTIONS, WIDGET_TYPES } from './types.ts';
-import { clampPlacement, createWidget, defaultPlacement, newId } from './defaults.ts';
+import { clampPlacement, createWidget, defaultData, defaultPlacement, newId } from './defaults.ts';
+import { retainRateWindow } from './time.ts';
+import { isGameTrackingConfig } from './game-tracking.ts';
 
 export type Action =
   | { type: 'widget/add'; widgetType: WidgetType }
@@ -19,31 +21,33 @@ export type Action =
   | { type: 'settings/hotkey'; action: HotkeyAction; accelerator: string }
   | { type: 'rate/sample'; id: string; value: number; at: number }
   | { type: 'rate/reset'; id: string }
+  | { type: 'exp/sample'; id: string; value: number; required: number; level: number; at: number }
+  | { type: 'tracking/start'; expId: string; mesoId: string; at: number }
+  | { type: 'tracking/gain'; expId: string; mesoId: string; exp: number; mesos: number; items: { name: string; quantity: number }[]; at: number }
+  | { type: 'loot/value'; id: string; name: string; unitValue: number; itemId: number | null }
+  | { type: 'potion/used'; id: string; potionId: string; quantity: number }
+  | { type: 'potion/reset'; id: string }
   | { type: 'session/toggle'; id: string; at: number }
   | { type: 'session/reset'; id: string }
   | { type: 'timer/start'; id: string; timerId: string; at: number }
   | { type: 'timer/stop'; id: string; timerId: string }
   | { type: 'boss/mark'; id: string; entryId: string; at: number }
   | { type: 'boss/clear'; id: string; entryId: string }
-  | { type: 'kills/add'; id: string; delta: number; at: number }
-  | { type: 'kills/reset'; id: string }
   | { type: 'notes/dailyReset'; id: string; key: string };
 
 export const ACTION_TYPES: ReadonlySet<string> = new Set<Action['type']>([
   'widget/add', 'widget/remove', 'widget/rename', 'widget/config', 'widget/data', 'widget/front',
   'placement/set', 'profile/create', 'profile/rename', 'profile/delete', 'profile/activate', 'profile/next',
   'settings/set', 'settings/hotkey', 'rate/sample', 'rate/reset', 'session/toggle', 'session/reset',
-  'timer/start', 'timer/stop', 'boss/mark', 'boss/clear', 'kills/add', 'kills/reset', 'notes/dailyReset'
+  'timer/start', 'timer/stop', 'boss/mark', 'boss/clear', 'notes/dailyReset',
+  'exp/sample', 'potion/used', 'potion/reset', 'tracking/start', 'tracking/gain', 'loot/value'
 ]);
 
 export function isAction(v: unknown): v is Action {
   return typeof v === 'object' && v !== null && typeof (v as { type?: unknown }).type === 'string' && ACTION_TYPES.has((v as { type: string }).type);
 }
 
-/** An EXP % drop larger than this between samples is treated as a level up. */
-export const LEVEL_UP_DROP = 5;
-
-const SETTINGS_KEYS = ['displayId', 'clickThrough', 'overlayVisible', 'soundEnabled', 'launchAtLogin', 'gameDataPath'] as const;
+const SETTINGS_KEYS = ['displayId', 'clickThrough', 'overlayVisible', 'soundEnabled', 'launchAtLogin', 'gameDataPath', 'gameTracking'] as const;
 
 function finite(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n);
@@ -150,6 +154,9 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
           if (v === null || finite(v)) settings.displayId = v as number | null;
         } else if (key === 'gameDataPath') {
           if (typeof v === 'string' && v.trim()) settings.gameDataPath = v.trim();
+        } else if (key === 'gameTracking') {
+          if (isGameTrackingConfig(v)) settings.gameTracking = v;
+          else console.error('[settings] Invalid game tracking configuration.');
         } else if (typeof v === 'boolean') {
           settings[key] = v;
         }
@@ -164,30 +171,72 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
       };
     case 'rate/sample': {
       if (!finite(action.value) || !finite(action.at)) return state;
-      const w = state.widgets[action.id];
-      if (w?.type === 'exp') {
-        return updateWidget(state, action.id, 'exp', (e) => {
-          const pct = Math.min(100, Math.max(0, action.value));
-          let { levelOffset, levelUps } = e.data;
-          const last = e.data.samples.at(-1);
-          if (last && last.value - levelOffset - pct > LEVEL_UP_DROP) {
-            levelOffset += 100;
-            levelUps += 1;
-          }
-          const samples = [...e.data.samples, { t: action.at, value: pct + levelOffset }].slice(-500);
-          return { ...e, data: { samples, levelOffset, levelUps } };
-        });
-      }
-      return updateWidget(state, action.id, 'meso', (m) => ({
-        ...m,
-        data: { samples: [...m.data.samples, { t: action.at, value: Math.max(0, action.value) }].slice(-500) }
-      }));
+      return updateWidget(state, action.id, 'meso', (m) => {
+        if (m.data.samples.at(-1) && action.at <= m.data.samples.at(-1)!.t) return m;
+        return { ...m, data: { ...m.data, samples: [...m.data.samples, { t: action.at, value: Math.max(0, action.value) }].slice(-500) } };
+      });
     }
+    case 'exp/sample':
+      return updateWidget(state, action.id, 'exp', (e) => {
+        if (e.data.source === 'notifications') return e;
+        if (![action.value, action.required, action.level, action.at].every(Number.isSafeInteger) ||
+            action.value < 0 || action.required <= 0 || action.value >= action.required || action.level < 1 ||
+            action.at < 0 || (e.data.samples.at(-1) && action.at <= e.data.samples.at(-1)!.t)) return e;
+        const previous = e.data;
+        if (previous.current !== null && (action.level < previous.level || action.level > previous.level + 1)) return e;
+        const delta = previous.current === null ? 0 :
+          action.level === previous.level ? action.value - previous.current : previous.required - previous.current + action.value;
+        const gained = previous.gained + delta;
+        if (!Number.isSafeInteger(gained)) return e;
+        return { ...e, data: { unit: 'points', current: action.value, required: action.required, level: action.level,
+          gained, startedAt: previous.startedAt ?? action.at, migrated: false, source: 'manual',
+          samples: retainRateWindow([...previous.samples, { t: action.at, value: gained }], action.at) } };
+      });
+    case 'tracking/start': {
+      if (!finite(action.at) || state.widgets[action.expId]?.type !== 'exp' || state.widgets[action.mesoId]?.type !== 'meso') return state;
+      const exp = updateWidget(state, action.expId, 'exp', e => ({ ...e, data: { ...defaultData('exp'),
+        source: 'notifications', startedAt: action.at, samples: [{ t: action.at, value: 0 }] } }));
+      return updateWidget(exp, action.mesoId, 'meso', m => ({ ...m, data: { ...defaultData('meso'), trackingStartedAt: action.at } }));
+    }
+    case 'tracking/gain': {
+      if (!Number.isSafeInteger(action.exp) || action.exp < 0 || !Number.isSafeInteger(action.mesos) || action.mesos < 0 || !finite(action.at)) return state;
+      const exp = updateWidget(state, action.expId, 'exp', e => {
+        if (e.data.source !== 'notifications' || action.at <= (e.data.samples.at(-1)?.t ?? -1)) return e;
+        const gained = e.data.gained + action.exp;
+        return { ...e, data: { ...e.data, gained,
+          samples: retainRateWindow([...e.data.samples, { t: action.at, value: gained }], action.at) } };
+      });
+      return updateWidget(exp, action.mesoId, 'meso', m => {
+        const loot = [...m.data.loot];
+        for (const item of action.items) {
+          if (!item.name.trim() || !Number.isSafeInteger(item.quantity) || item.quantity <= 0) continue;
+          const index = loot.findIndex(l => l.name.toLowerCase() === item.name.toLowerCase());
+          if (index >= 0) loot[index] = { ...loot[index]!, quantity: loot[index]!.quantity + item.quantity };
+          else loot.push({ name: item.name, quantity: item.quantity, unitValue: null, itemId: null });
+        }
+        return { ...m, data: { ...m.data, pickups: m.data.pickups + action.mesos, loot } };
+      });
+    }
+    case 'loot/value':
+      if (!Number.isSafeInteger(action.unitValue) || action.unitValue < 0) return state;
+      return updateWidget(state, action.id, 'meso', m => ({ ...m, data: { ...m.data,
+        loot: m.data.loot.map(l => l.name.toLowerCase() === action.name.toLowerCase() ?
+          { ...l, unitValue: action.unitValue, itemId: action.itemId } : l) } }));
     case 'rate/reset': {
       const w = state.widgets[action.id];
-      if (w?.type === 'exp') return updateWidget(state, action.id, 'exp', (e) => ({ ...e, data: { samples: [], levelOffset: 0, levelUps: 0 } }));
-      return updateWidget(state, action.id, 'meso', (m) => ({ ...m, data: { samples: [] } }));
+      if (w?.type === 'exp') return updateWidget(state, action.id, 'exp', (e) => ({ ...e, data: defaultData('exp') }));
+      return updateWidget(state, action.id, 'meso', (m) => ({ ...m, data: defaultData('meso') }));
     }
+    case 'potion/used':
+      return updateWidget(state, action.id, 'meso', (m) => {
+        const potion = m.config.potions.find(p => p.id === action.potionId);
+        if (!potion || !Number.isSafeInteger(action.quantity) || action.quantity !== 1 ||
+            !finite(potion.unitCost) || potion.unitCost <= 0) return m;
+        return { ...m, data: { ...m.data, potionCosts: m.data.potionCosts + potion.unitCost,
+          potionUses: { ...m.data.potionUses, [potion.id]: (m.data.potionUses[potion.id] ?? 0) + action.quantity } } };
+      });
+    case 'potion/reset':
+      return updateWidget(state, action.id, 'meso', m => ({ ...m, data: { ...m.data, potionCosts: 0, potionUses: {} } }));
     case 'session/toggle':
       return updateWidget(state, action.id, 'session', (s) => {
         const d = s.data;
@@ -218,14 +267,6 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
         const { [action.entryId]: _cleared, ...nextAt } = b.data.nextAt;
         return { ...b, data: { nextAt } };
       });
-    case 'kills/add':
-      return updateWidget(state, action.id, 'kills', (k) => {
-        if (!finite(action.delta)) return k;
-        const count = Math.max(0, k.data.count + Math.trunc(action.delta));
-        return { ...k, data: { count, startedAt: k.data.startedAt || action.at } };
-      });
-    case 'kills/reset':
-      return updateWidget(state, action.id, 'kills', (k) => ({ ...k, data: { count: 0, startedAt: 0 } }));
     case 'notes/dailyReset':
       return updateWidget(state, action.id, 'notes', (n) =>
         n.data.lastResetKey === action.key

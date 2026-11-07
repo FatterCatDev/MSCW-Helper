@@ -6,6 +6,7 @@ import type { AppState, BossEntry, TimerEntry, WidgetConfigMap, WidgetDef, Widge
 import type { Dispatch } from '../common/state.ts';
 import { Field, NumberField, TextField, Toggle } from './fields.tsx';
 import { HotkeyInput } from './HotkeyInput.tsx';
+import { PotionEditor } from './PotionEditor.tsx';
 
 interface EditorProps<T extends WidgetType> {
   w: WidgetDef<T>;
@@ -162,22 +163,6 @@ function NotesEditor({ w, setConfig }: EditorProps<'notes'>): ReactNode {
   );
 }
 
-function KillsEditor({ w, state, setConfig }: EditorProps<'kills'>): ReactNode {
-  return (
-    <>
-      <Field label="Label">
-        <TextField value={w.config.label} maxLength={30} onCommit={(label) => setConfig({ label })} />
-      </Field>
-      <Field label="Goal" hint="0 = no goal (e.g. quest kill count)">
-        <NumberField value={w.config.goal} min={0} max={1e9} onCommit={(v) => setConfig({ goal: Math.round(v) })} />
-      </Field>
-      <Field label="+1 hotkey" hint="Global hotkey; works while the game is focused.">
-        <HotkeyInput value={w.config.hotkey} error={w.config.hotkey ? state.runtime.hotkeyErrors[w.config.hotkey] : undefined} onChange={(hotkey) => setConfig({ hotkey })} />
-      </Field>
-    </>
-  );
-}
-
 function ImageEditor({ w, setConfig }: EditorProps<'image'>): ReactNode {
   return (
     <>
@@ -208,19 +193,17 @@ export function WidgetConfigEditor(props: { w: WidgetDef; state: AppState; dispa
   const setConfig = (patch: object): void => dispatch({ type: 'widget/config', id: w.id, config: patch as Record<string, unknown> });
   switch (w.type) {
     case 'meso':
-      return <MesoEditor w={w} state={state} setConfig={setConfig} />;
+      return <><MesoEditor w={w} state={state} setConfig={setConfig} /><PotionEditor w={w} status={state.runtime.potionTracking[w.id]} setConfig={setConfig} /></>;
     case 'timers':
       return <TimersEditor w={w} state={state} setConfig={setConfig} />;
     case 'boss':
       return <BossEditor w={w} state={state} setConfig={setConfig} />;
     case 'notes':
       return <NotesEditor w={w} state={state} setConfig={setConfig} />;
-    case 'kills':
-      return <KillsEditor w={w} state={state} setConfig={setConfig} />;
     case 'image':
       return <ImageEditor w={w} state={state} setConfig={setConfig} />;
     case 'exp':
-      return <p className="hint">Type your current EXP % into the widget whenever you like; rate and time-to-level update automatically. Level ups are detected when the % drops.</p>;
+      return <p className="hint">Enter your level, current EXP points, and EXP needed for that level in the widget. Record every level transition; a same-level drop is a loss, not a level up. Rates use the last minute and last ten minutes (or elapsed session time while warming up). Sparse readings are interpolated. Reset starts a new EXP session.</p>;
     case 'session':
       return <p className="hint">No settings. Start/pause/reset from the widget.</p>;
   }

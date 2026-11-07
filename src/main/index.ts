@@ -4,10 +4,14 @@ import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IMAGE_SCHEME, IPC } from '../shared/ipc.ts';
 import { isAction, reducer, type Action } from '../shared/reducer.ts';
-import type { AppState, HotkeyAction, PersistedState, RuntimeState } from '../shared/types.ts';
+import type { AppState, GameTrackingConfig, HotkeyAction, PersistedState, RuntimeState } from '../shared/types.ts';
 import { createAppIcon } from './icon.ts';
 import { Store } from './store.ts';
 import { getGameAssets, importGameAssets } from './game-assets.ts';
+import { lookupPotion } from './items.ts';
+import { capturePreviews, PotionCapture } from './potion-capture.ts';
+import { GameTracking } from './game-tracking.ts';
+import { listGameWindows } from './window-capture.ts';
 
 const IMAGE_NAME_RE = /^[0-9a-f-]{36}\.(png|jpe?g|gif|webp|bmp)$/i;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -33,7 +37,12 @@ let quitting = false;
 let rendererWantsIgnore = true;
 let hotkeySignature = '';
 let importingGameAssets = false;
-const runtime: RuntimeState = { editMode: false, hotkeyErrors: {}, displays: [] };
+let potionCapture: PotionCapture;
+let gameTracking: GameTracking;
+let captureWindow: BrowserWindow | null = null;
+let captureConfig: GameTrackingConfig | null = null;
+const runtime: RuntimeState = { editMode: false, hotkeyErrors: {}, displays: [], potionTracking: {},
+  gameTracking: { running: false, fps: 0, frames: 0, message: 'Automatic tracking stopped.' } };
 
 function fullState(): AppState {
   return { ...store.get(), runtime };
@@ -47,8 +56,20 @@ function broadcast(): void {
 }
 
 function dispatch(action: Action): void {
+  if (action.type === 'rate/reset' || action.type === 'potion/reset') potionCapture.stop(action.id);
+  if (action.type === 'rate/reset' && runtime.gameTracking.running &&
+      [store.get().settings.gameTracking.expWidgetId, store.get().settings.gameTracking.mesoWidgetId].includes(action.id)) gameTracking.stop();
   const prev = store.get();
-  const next = reducer(prev, action);
+  let next = reducer(prev, action);
+  if (action.type === 'settings/set' && action.patch.gameTracking) {
+    const config = next.settings.gameTracking;
+    const meso = next.widgets[config.mesoWidgetId];
+    if (meso?.type === 'meso') for (const item of meso.data.loot) {
+      const price = config.priceOverrides[item.name.toLowerCase()];
+      if (Number.isSafeInteger(price) && price! >= 0) next = reducer(next,
+        { type: 'loot/value', id: meso.id, name: item.name, unitValue: price!, itemId: item.itemId });
+    }
+  }
   if (next === prev) return;
   store.set(next);
   applySideEffects(prev, next);
@@ -56,6 +77,20 @@ function dispatch(action: Action): void {
 }
 
 function applySideEffects(prev: PersistedState | null, next: PersistedState): void {
+  if (runtime.gameTracking.running && prev &&
+      (prev.settings.gameTracking !== next.settings.gameTracking ||
+       !next.widgets[next.settings.gameTracking.expWidgetId] || !next.widgets[next.settings.gameTracking.mesoWidgetId])) {
+    gameTracking.stop('Tracking configuration changed. Start again to begin a new session.');
+  }
+  for (const [id, status] of Object.entries(runtime.potionTracking)) {
+    const before = prev?.widgets[id];
+    const after = next.widgets[id];
+    if (status.running && (!after || after.type !== 'meso' ||
+        (before?.type === 'meso' && before.config.potions !== after.config.potions))) {
+      potionCapture.stop(id, 'Configuration changed. Start again to establish a new baseline.');
+    }
+    if (!after) delete runtime.potionTracking[id];
+  }
   const s = next.settings;
   if (!prev || prev.settings.displayId !== s.displayId) positionOverlay();
   if (!prev || prev.settings.overlayVisible !== s.overlayVisible) updateOverlayVisibility();
@@ -284,8 +319,6 @@ function registerHotkeys(state: PersistedState): void {
       for (const t of w.config.timers) {
         bindings.push({ accel: t.hotkey, label: `${w.title}: ${t.name}`, run: () => dispatch({ type: 'timer/start', id: w.id, timerId: t.id, at: Date.now() }) });
       }
-    } else if (w?.type === 'kills') {
-      bindings.push({ accel: w.config.hotkey, label: `${w.title}: +1`, run: () => dispatch({ type: 'kills/add', id: w.id, delta: 1, at: Date.now() }) });
     }
   }
   const active = bindings.filter((b) => b.accel.trim() !== '');
@@ -393,6 +426,48 @@ function registerIpc(): void {
   const requireControl = (e: IpcMainInvokeEvent): void => {
     if (!control || BrowserWindow.fromWebContents(e.sender) !== control) throw new Error('Game asset access is only available from the control panel.');
   };
+  ipcMain.handle(IPC.startGameTracking, async e => {
+    requireControl(e);
+    const config = store.get().settings.gameTracking;
+    if (store.get().widgets[config.expWidgetId]?.type !== 'exp' || store.get().widgets[config.mesoWidgetId]?.type !== 'meso') {
+      throw new Error('Choose an EXP Tracker and Meso Tracker first.');
+    }
+    potionCapture.stop(config.mesoWidgetId, 'Stopped for a new gain session. Start potion detection again if needed.');
+    await gameTracking.start(config);
+  });
+  ipcMain.handle(IPC.stopGameTracking, e => { requireControl(e); gameTracking.stop(); });
+  ipcMain.handle(IPC.captureConfig, e => {
+    if (!captureWindow || e.sender !== captureWindow.webContents || !captureConfig) throw new Error('Capture configuration is only available to the capture window.');
+    return captureConfig;
+  });
+  ipcMain.on(IPC.captureFrame, (e, image: unknown) => {
+    if (captureWindow && e.sender === captureWindow.webContents) gameTracking.frame(image);
+  });
+  ipcMain.on(IPC.captureError, (e, message: unknown) => {
+    if (captureWindow && e.sender === captureWindow.webContents && typeof message === 'string') {
+      console.error('[game-tracking] capture failed', message);
+      gameTracking.stop(message.slice(0, 500));
+    }
+  });
+  ipcMain.handle(IPC.lookupPotion, async (e, itemId: unknown, version: unknown) => {
+    requireControl(e);
+    return lookupPotion(itemId, version);
+  });
+  ipcMain.handle(IPC.capturePreviews, async (e) => {
+    requireControl(e);
+    return capturePreviews();
+  });
+  ipcMain.handle(IPC.startPotions, async (e, id: unknown) => {
+    requireControl(e);
+    if (typeof id !== 'string' || store.get().widgets[id]?.type !== 'meso') throw new Error('Select a Meso Tracker.');
+    const w = store.get().widgets[id];
+    if (w?.type === 'meso') await potionCapture.start(id, w.config.potions);
+  });
+  ipcMain.handle(IPC.stopPotions, async (e, id: unknown) => {
+    requireControl(e);
+    if (typeof id !== 'string') throw new Error('A widget ID is required.');
+    potionCapture.stop(id);
+  });
   ipcMain.handle(IPC.pickGameData, async (e) => {
     requireControl(e);
     const result = await dialog.showOpenDialog(control!, {
@@ -428,7 +503,8 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.getState, (e) => (fromOurWindow(e) ? fullState() : null));
   ipcMain.on(IPC.dispatch, (e, action: unknown) => {
-    if (fromOurWindow(e) && isAction(action)) dispatch(action);
+    if (fromOurWindow(e) && isAction(action) &&
+        !['potion/used', 'tracking/start', 'tracking/gain', 'loot/value'].includes(action.type)) dispatch(action);
   });
   ipcMain.on(IPC.setEditMode, (e, on: unknown) => {
     if (fromOurWindow(e) && typeof on === 'boolean') setEditMode(on);
@@ -461,6 +537,46 @@ function registerIpc(): void {
 function start(): void {
   app.setAppUserModelId('com.mscwhelper.app');
   store = new Store(join(app.getPath('userData'), 'mscw-helper.json'));
+  potionCapture = new PotionCapture(dispatch, (id, status) => {
+    runtime.potionTracking[id] = status;
+    broadcast();
+  });
+  gameTracking = new GameTracking(dispatch, status => { runtime.gameTracking = status; broadcast(); },
+    async config => {
+      captureConfig = config;
+      const captureSession = session.fromPartition('mscw-window-capture');
+      captureSession.setPermissionRequestHandler((wc, permission, callback) =>
+        callback(wc === captureWindow?.webContents && (permission === 'media' || permission === 'display-capture')));
+      captureSession.setPermissionCheckHandler((wc, permission) =>
+        wc === captureWindow?.webContents && (permission === 'media' || permission === 'display-capture'));
+      captureSession.setDisplayMediaRequestHandler(async (request, callback) => {
+        try {
+          if (!captureWindow || request.frame !== captureWindow.webContents.mainFrame || request.audioRequested) {
+            callback({}); return;
+          }
+          const source = (await listGameWindows(false)).find(s => s.id === config.sourceId);
+          if (!source) throw new Error('Selected game window no longer exists.');
+          callback({ video: source });
+        } catch (error) {
+          console.error('[game-tracking] display media request failed', error);
+          callback({});
+        }
+      });
+      captureWindow = new BrowserWindow({ show: false, focusable: false, webPreferences: {
+        preload: join(__dirname, '../preload/index.js'), sandbox: true, contextIsolation: true,
+        nodeIntegration: false, backgroundThrottling: false, session: captureSession
+      } });
+      captureWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      captureWindow.webContents.on('will-navigate', event => event.preventDefault());
+      captureWindow.webContents.on('render-process-gone', () => gameTracking.stop('Capture process ended.'));
+      const dev = process.env['ELECTRON_RENDERER_URL'];
+      if (dev) await captureWindow.loadURL(`${dev}/capture.html`);
+      else await captureWindow.loadFile(join(__dirname, '../renderer/capture.html'));
+    }, () => {
+      const window = captureWindow;
+      captureWindow = null; captureConfig = null;
+      if (window && !window.isDestroyed()) window.destroy();
+    });
   imagesDir = join(app.getPath('userData'), 'images');
   mkdirSync(imagesDir, { recursive: true });
   sweepImages();
@@ -489,6 +605,8 @@ function start(): void {
 
   app.on('before-quit', () => {
     quitting = true;
+    potionCapture.dispose();
+    gameTracking.dispose();
     store.flush();
   });
   app.on('will-quit', () => globalShortcut.unregisterAll());

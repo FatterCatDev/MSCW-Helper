@@ -1,4 +1,4 @@
-export const WIDGET_TYPES = ['exp', 'meso', 'session', 'timers', 'boss', 'notes', 'kills', 'image'] as const;
+export const WIDGET_TYPES = ['exp', 'meso', 'session', 'timers', 'boss', 'notes', 'image'] as const;
 export type WidgetType = (typeof WIDGET_TYPES)[number];
 
 export interface TimerEntry {
@@ -24,12 +24,11 @@ export interface BossEntry {
 
 export interface WidgetConfigMap {
   exp: Record<string, never>;
-  meso: { goal: number };
+  meso: { goal: number; potions: PotionTracker[] };
   session: Record<string, never>;
   timers: { timers: TimerEntry[]; warnSec: number };
   boss: { entries: BossEntry[]; warnMin: number };
   notes: { autoResetDaily: boolean; resetHourUtc: number };
-  kills: { goal: number; hotkey: string; label: string };
   image: { fit: 'contain' | 'cover' };
 }
 
@@ -39,14 +38,23 @@ export interface RateSample {
 }
 
 export interface WidgetDataMap {
-  /** value = EXP percent (0-100). `levelOffset` accumulates +100 per detected level up. */
-  exp: { samples: RateSample[]; levelOffset: number; levelUps: number };
-  meso: { samples: RateSample[] };
+  exp: {
+    unit: 'points';
+    samples: RateSample[];
+    current: number | null;
+    required: number;
+    level: number;
+    gained: number;
+    startedAt: number | null;
+    migrated: boolean;
+    source: 'manual' | 'notifications';
+  };
+  meso: { samples: RateSample[]; potionCosts: number; potionUses: Record<string, number>;
+    pickups: number; loot: LootEntry[]; trackingStartedAt: number | null };
   session: { running: boolean; startedAt: number; accumulatedMs: number };
   timers: { endsAt: Record<string, number> };
   boss: { nextAt: Record<string, number> };
   notes: { text: string; items: ChecklistItem[]; lastResetKey: string };
-  kills: { count: number; startedAt: number };
   image: { images: string[]; index: number };
 }
 
@@ -97,6 +105,31 @@ export interface Settings {
   soundEnabled: boolean;
   launchAtLogin: boolean;
   gameDataPath: string;
+  gameTracking: GameTrackingConfig;
+}
+
+export interface LootEntry {
+  name: string;
+  quantity: number;
+  unitValue: number | null;
+  itemId: number | null;
+}
+
+export interface GameTrackingConfig {
+  sourceId: string;
+  windowName: string;
+  region: CaptureRegion;
+  expWidgetId: string;
+  mesoWidgetId: string;
+  apiVersion: string;
+  priceOverrides: Record<string, number>;
+}
+
+export interface GameTrackingStatus {
+  running: boolean;
+  fps: number;
+  frames: number;
+  message: string;
 }
 
 export interface GameAssetImport {
@@ -105,6 +138,41 @@ export interface GameAssetImport {
   fileCount: number;
   totalBytes: number;
   directory: string;
+}
+
+export interface CaptureRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PotionTracker {
+  id: string;
+  itemId: number;
+  name: string;
+  unitCost: number;
+  sourceId: string;
+  region: CaptureRegion;
+}
+
+export interface PotionItem {
+  id: number;
+  name: string;
+  description: string;
+  npcSellPrice: number | null;
+}
+
+export interface CapturePreview {
+  id: string;
+  name: string;
+  image: string;
+}
+
+export interface PotionStatus {
+  running: boolean;
+  message: string;
+  counts: Record<string, number>;
 }
 
 export interface PersistedState {
@@ -122,6 +190,8 @@ export interface RuntimeState {
   /** Accelerators that failed to register, with reason. */
   hotkeyErrors: Record<string, string>;
   displays: { id: number; label: string; primary: boolean }[];
+  potionTracking: Record<string, PotionStatus>;
+  gameTracking: GameTrackingStatus;
 }
 
 export interface AppState extends PersistedState {

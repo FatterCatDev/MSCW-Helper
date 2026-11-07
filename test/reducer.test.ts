@@ -19,7 +19,7 @@ test('adding a widget shows it only in the active layout', () => {
   let s = run(defaultState(), { type: 'profile/create', name: 'Bossing' });
   const bossing = s.activeProfileId;
   s = run(s, { type: 'widget/add', widgetType: 'meso' });
-  const meso = widgetOfType(s, 'meso');
+  const meso = s.widgets[s.widgetOrder.at(-1)!]!;
   assert.ok(meso);
   for (const p of s.profiles) assert.equal(p.placements[meso.id]?.visible, p.id === bossing);
 });
@@ -63,26 +63,29 @@ test('profile/next cycles through layouts', () => {
   assert.equal(s.activeProfileId, a);
 });
 
-test('EXP samples detect level ups and keep cumulative progress', () => {
+test('EXP points accumulate across explicitly recorded level ups with different requirements', () => {
   let s = defaultState();
   const exp = widgetOfType(s, 'exp');
   s = run(
     s,
-    { type: 'rate/sample', id: exp.id, value: 90, at: 0 },
-    { type: 'rate/sample', id: exp.id, value: 99, at: 1000 },
-    { type: 'rate/sample', id: exp.id, value: 4, at: 2000 }
+    { type: 'exp/sample', id: exp.id, value: 900, required: 1000, level: 10, at: 0 },
+    { type: 'exp/sample', id: exp.id, value: 990, required: 1000, level: 10, at: 1000 },
+    { type: 'exp/sample', id: exp.id, value: 40, required: 1500, level: 11, at: 2000 }
   );
   const d = widgetOfType(s, 'exp').data;
-  assert.equal(d.levelUps, 1);
-  assert.equal(d.levelOffset, 100);
-  assert.deepEqual(d.samples.map((x) => x.value), [90, 99, 104]);
+  assert.equal(d.level, 11);
+  assert.equal(d.gained, 140);
+  assert.equal(d.required, 1500);
+  assert.deepEqual(d.samples.map((x) => x.value), [0, 90, 140]);
 });
 
-test('small EXP drops (e.g. death penalty) are not level ups', () => {
+test('same-level EXP loss is not interpreted as a level up', () => {
   let s = defaultState();
   const exp = widgetOfType(s, 'exp');
-  s = run(s, { type: 'rate/sample', id: exp.id, value: 50, at: 0 }, { type: 'rate/sample', id: exp.id, value: 47, at: 1000 });
-  assert.equal(widgetOfType(s, 'exp').data.levelUps, 0);
+  s = run(s, { type: 'exp/sample', id: exp.id, value: 500, required: 1000, level: 10, at: 0 },
+    { type: 'exp/sample', id: exp.id, value: 100, required: 1000, level: 10, at: 1000 });
+  assert.equal(widgetOfType(s, 'exp').data.level, 10);
+  assert.equal(widgetOfType(s, 'exp').data.gained, -400);
 });
 
 test('session timer accumulates across pause/resume', () => {
@@ -105,18 +108,91 @@ test('timer/start uses the configured duration; stop clears it', () => {
   assert.equal(widgetOfType(s, 'timers').data.endsAt[t.id], undefined);
 });
 
-test('kill counter never goes negative and records start time once', () => {
-  let s = defaultState();
-  const id = widgetOfType(s, 'kills').id;
-  s = run(s, { type: 'kills/add', id, delta: -1, at: 1 }, { type: 'kills/add', id, delta: 1, at: 2 }, { type: 'kills/add', id, delta: 1, at: 3 });
-  assert.deepEqual(widgetOfType(s, 'kills').data, { count: 2, startedAt: 1 });
-});
-
 test('actions targeting the wrong widget type are ignored', () => {
   const s = defaultState();
   const exp = widgetOfType(s, 'exp');
-  assert.equal(run(s, { type: 'kills/add', id: exp.id, delta: 1, at: 1 }), s);
+  assert.equal(run(s, { type: 'potion/used', id: exp.id, potionId: 'nope', quantity: 1 }), s);
   assert.equal(run(s, { type: 'session/toggle', id: 'nope', at: 1 }), s);
+});
+
+test('old kill widgets are removed from every layout and percentage history is not reinterpreted as points', () => {
+  const s = defaultState();
+  const exp = widgetOfType(s, 'exp');
+  const raw = JSON.parse(JSON.stringify(s));
+  raw.widgets.oldKills = { id: 'oldKills', type: 'kills', config: {}, data: { count: 20 } };
+  raw.widgetOrder.push('oldKills');
+  raw.profiles[0].placements.oldKills = raw.profiles[0].placements[exp.id];
+  raw.widgets[exp.id].data = { samples: [{ t: 0, value: 90 }], levelOffset: 0, levelUps: 0 };
+  const fixed = normalizeState(raw);
+  assert.equal(fixed.widgets.oldKills, undefined);
+  assert.ok(!fixed.widgetOrder.includes('oldKills'));
+  assert.equal(fixed.profiles[0]!.placements.oldKills, undefined);
+  assert.equal(widgetOfType(fixed, 'exp').data.migrated, true);
+  assert.deepEqual(widgetOfType(fixed, 'exp').data.samples, []);
+});
+
+test('EXP session total survives rolling history pruning and reset starts a new baseline', () => {
+  let s = defaultState();
+  const id = widgetOfType(s, 'exp').id;
+  for (let minute = 0; minute <= 30; minute++) {
+    s = run(s, { type: 'exp/sample', id, value: minute * 100, required: 10000, level: 10, at: minute * 60_000 });
+  }
+  const d = widgetOfType(s, 'exp').data;
+  assert.equal(d.gained, 3000);
+  assert.equal(d.startedAt, 0);
+  assert.equal(d.samples[0]!.t, 19 * 60_000);
+  assert.equal(d.samples.length, 12);
+  assert.deepEqual(widgetOfType(normalizeState(s), 'exp').data, d);
+  s = run(s, { type: 'rate/reset', id });
+  assert.equal(widgetOfType(s, 'exp').data.startedAt, null);
+  assert.equal(widgetOfType(s, 'exp').data.gained, 0);
+});
+
+test('invalid, out-of-order and skipped-level EXP readings are rejected', () => {
+  let s = defaultState();
+  const id = widgetOfType(s, 'exp').id;
+  s = run(s, { type: 'exp/sample', id, value: 100, required: 1000, level: 10, at: 1000 });
+  const base = { type: 'exp/sample' as const, id, value: 200, required: 1000, level: 10, at: 2000 };
+  for (const patch of [{ value: NaN }, { value: 0.5 }, { value: 1000 }, { required: 0 },
+    { level: 12 }, { level: 9 }, { at: 1000 }]) {
+    assert.equal(run(s, { ...base, ...patch }), s);
+  }
+});
+
+test('potion expenses accumulate at configured purchase prices without changing wallet samples', () => {
+  let s = defaultState();
+  const id = widgetOfType(s, 'meso').id;
+  s = run(s, { type: 'widget/config', id, config: { potions: [
+    { id: 'hp', itemId: 2000000, name: 'Red Potion', unitCost: 50, sourceId: 'screen:0:0',
+      region: { x: 0, y: 0, width: 0.1, height: 0.1 } }
+  ] } }, { type: 'rate/sample', id, value: 10000, at: 1000 });
+  const samples = widgetOfType(s, 'meso').data.samples;
+  s = run(s, { type: 'potion/used', id, potionId: 'hp', quantity: 1 },
+    { type: 'potion/used', id, potionId: 'hp', quantity: 1 });
+  assert.equal(widgetOfType(s, 'meso').data.potionCosts, 100);
+  assert.equal(widgetOfType(s, 'meso').data.potionUses.hp, 2);
+  assert.deepEqual(widgetOfType(s, 'meso').data.samples, samples);
+  assert.equal(run(s, { type: 'potion/used', id, potionId: 'hp', quantity: 20 }), s);
+  assert.equal(run(s, { type: 'potion/used', id, potionId: 'missing', quantity: 1 }), s);
+  assert.equal(widgetOfType(run(s, { type: 'potion/reset', id }), 'meso').data.potionCosts, 0);
+  assert.equal(widgetOfType(run(s, { type: 'rate/reset', id }), 'meso').data.potionCosts, 0);
+  assert.equal(widgetOfType(normalizeState(s), 'meso').data.potionCosts, 100);
+});
+
+test('legacy mesos data gets potion defaults and incomplete potion setup survives restart', () => {
+  const s = defaultState();
+  const meso = widgetOfType(s, 'meso');
+  const raw = JSON.parse(JSON.stringify(s));
+  raw.widgets[meso.id].config = { goal: 100000 };
+  raw.widgets[meso.id].data = { samples: [{ t: 1000, value: 500 }] };
+  const migrated = widgetOfType(normalizeState(raw), 'meso');
+  assert.equal(migrated.config.goal, 100000);
+  assert.deepEqual(migrated.config.potions, []);
+  assert.equal(migrated.data.potionCosts, 0);
+  assert.deepEqual(migrated.data.samples, [{ t: 1000, value: 500 }]);
+  raw.widgets[meso.id].config.potions = [{ id: 'hp', itemId: 2000000, name: 'Red Potion', unitCost: 0,
+    sourceId: '', region: { x: 0, y: 0, width: 0, height: 0 } }];
+  assert.equal(widgetOfType(normalizeState(raw), 'meso').config.potions.length, 1);
 });
 
 test('notes daily reset unchecks items once per key', () => {

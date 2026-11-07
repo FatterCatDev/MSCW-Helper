@@ -6,6 +6,7 @@ import { Field, NumberField, Slider, TextField, Toggle } from './fields.tsx';
 import { HotkeyInput } from './HotkeyInput.tsx';
 import { WidgetConfigEditor } from './WidgetEditors.tsx';
 import { GameAssets } from './GameAssets.tsx';
+import { GameTrackingSettings } from './GameTracking.tsx';
 
 type Tab = 'widgets' | 'layouts' | 'settings' | 'about';
 
@@ -190,6 +191,7 @@ function SettingsTab({ state, dispatch }: { state: AppState; dispatch: Dispatch 
         label="Click-through: widgets ignore the mouse entirely (use hotkeys to interact)"
       />
       <Toggle checked={s.soundEnabled} onChange={(soundEnabled) => dispatch({ type: 'settings/set', patch: { soundEnabled } })} label="Sound alerts for timers" />
+      <GameTrackingSettings state={state} dispatch={dispatch} />
       <GameAssets path={s.gameDataPath} dispatch={dispatch} />
       <h3>App</h3>
       <Toggle checked={s.launchAtLogin} onChange={(launchAtLogin) => dispatch({ type: 'settings/set', patch: { launchAtLogin } })} label="Launch at Windows sign-in (installed app only)" />
@@ -216,7 +218,7 @@ function AboutTab(): ReactNode {
       </ul>
       <h3>Roadmap</h3>
       <ul>
-        <li>Screen-capture + OCR to read EXP and mesos automatically (no memory reading — safe for your account).</li>
+        <li>Automatic gain-notification and potion OCR are experimental; verify compatibility with the game's rules.</li>
       </ul>
     </div>
   );

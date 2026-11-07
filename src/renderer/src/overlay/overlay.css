@@ -12,6 +12,36 @@ body.overlay-body,
   height: 100vh;
 }
 
+.capture-fps {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  padding: 5px 8px;
+  background: rgba(16, 18, 24, 0.8);
+  color: white;
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.exp-entry {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.exp-entry input {
+  min-width: 0;
+  width: 100%;
+}
+
+.exp-entry label {
+  min-width: 0;
+}
+
+.exp-entry button {
+  align-self: end;
+}
+
 .overlay-root.edit {
   background-color: rgba(10, 12, 18, 0.25);
   background-image:

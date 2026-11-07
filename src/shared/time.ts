@@ -2,6 +2,29 @@ import type { BossEntry, RateSample } from './types.ts';
 
 export const HOUR = 3_600_000;
 
+export function retainRateWindow(samples: RateSample[], now: number): RateSample[] {
+  const firstInside = samples.findIndex(s => s.t >= now - 10 * 60_000);
+  return samples.slice(Math.max(0, (firstInside < 0 ? samples.length : firstInside) - 1));
+}
+
+/** Interpolates sparse readings at the window boundary; holds the last reading during idle time. */
+export function rollingPerMinute(samples: readonly RateSample[], now: number, windowMs: number): number | null {
+  const first = samples[0];
+  const last = samples.at(-1);
+  if (!first || !last || samples.length < 2 || now <= first.t || now < last.t || windowMs <= 0) return null;
+  const start = Math.max(first.t, now - windowMs);
+  let value = last.value;
+  for (let i = 1; i < samples.length; i++) {
+    const left = samples[i - 1]!;
+    const right = samples[i]!;
+    if (start <= right.t) {
+      value = left.value + (right.value - left.value) * (start - left.t) / (right.t - left.t);
+      break;
+    }
+  }
+  return (last.value - value) * 60_000 / (now - start);
+}
+
 /** Units gained per hour between the first and last sample, or null if not enough data. */
 export function ratePerHour(samples: readonly RateSample[]): number | null {
   if (samples.length < 2) return null;

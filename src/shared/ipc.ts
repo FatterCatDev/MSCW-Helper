@@ -1,5 +1,5 @@
 import type { Action } from './reducer.ts';
-import type { AppState, GameAssetImport } from './types.ts';
+import type { AppState, CapturePreview, GameAssetImport, GameTrackingConfig, PotionItem } from './types.ts';
 
 export const IPC = {
   getState: 'state:get',
@@ -15,6 +15,15 @@ export const IPC = {
   pickGameData: 'game-data:pick',
   importGameAssets: 'game-assets:import',
   getGameAssets: 'game-assets:get',
+  lookupPotion: 'potions:lookup',
+  capturePreviews: 'potions:preview',
+  startPotions: 'potions:start',
+  stopPotions: 'potions:stop',
+  startGameTracking: 'game-tracking:start',
+  stopGameTracking: 'game-tracking:stop',
+  captureConfig: 'capture:config',
+  captureFrame: 'capture:frame',
+  captureError: 'capture:error',
   quit: 'app:quit'
 } as const;
 
@@ -39,5 +48,14 @@ export interface MscwApi {
   pickGameData(): Promise<string | null>;
   importGameAssets(path: string): Promise<GameAssetImport>;
   getGameAssets(): Promise<GameAssetImport | null>;
+  lookupPotion(itemId: number, version: string): Promise<PotionItem>;
+  capturePreviews(): Promise<CapturePreview[]>;
+  startPotions(widgetId: string): Promise<void>;
+  stopPotions(widgetId: string): Promise<void>;
+  startGameTracking(): Promise<void>;
+  stopGameTracking(): Promise<void>;
+  captureConfig(): Promise<GameTrackingConfig>;
+  captureFrame(image: string): void;
+  captureError(message: string): void;
   quit(): void;
 }

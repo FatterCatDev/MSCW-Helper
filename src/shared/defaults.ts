@@ -3,12 +3,14 @@ import type {
   PersistedState,
   Placement,
   Settings,
+  PotionTracker,
   WidgetConfigMap,
   WidgetDataMap,
   WidgetDef,
   WidgetType
 } from './types.ts';
 import { HOTKEY_ACTIONS, WIDGET_TYPES } from './types.ts';
+import { DEFAULT_GAIN_REGION, validRegion } from './game-tracking.ts';
 
 export const WIDGET_LABELS: Record<WidgetType, string> = {
   exp: 'EXP Tracker',
@@ -17,18 +19,16 @@ export const WIDGET_LABELS: Record<WidgetType, string> = {
   timers: 'Buff / Cooldown Timers',
   boss: 'Boss / Event Timers',
   notes: 'Notes & Checklist',
-  kills: 'Kill Counter',
   image: 'Image / Map Panel'
 };
 
 export const DEFAULT_SIZES: Record<WidgetType, { w: number; h: number }> = {
-  exp: { w: 260, h: 190 },
-  meso: { w: 260, h: 170 },
+  exp: { w: 300, h: 310 },
+  meso: { w: 280, h: 300 },
   session: { w: 220, h: 110 },
   timers: { w: 240, h: 200 },
   boss: { w: 260, h: 200 },
   notes: { w: 260, h: 260 },
-  kills: { w: 220, h: 140 },
   image: { w: 320, h: 240 }
 };
 
@@ -39,7 +39,7 @@ export function newId(): string {
 export function defaultConfig<T extends WidgetType>(type: T): WidgetConfigMap[T] {
   const configs: WidgetConfigMap = {
     exp: {},
-    meso: { goal: 0 },
+    meso: { goal: 0, potions: [] },
     session: {},
     timers: {
       warnSec: 10,
@@ -53,7 +53,6 @@ export function defaultConfig<T extends WidgetType>(type: T): WidgetConfigMap[T]
       entries: [{ id: newId(), name: 'Field boss', kind: 'respawn', respawnMin: 45, times: [] }]
     },
     notes: { autoResetDaily: true, resetHourUtc: 0 },
-    kills: { goal: 0, hotkey: '', label: 'Kills' },
     image: { fit: 'contain' }
   };
   return configs[type];
@@ -61,13 +60,12 @@ export function defaultConfig<T extends WidgetType>(type: T): WidgetConfigMap[T]
 
 export function defaultData<T extends WidgetType>(type: T): WidgetDataMap[T] {
   const data: WidgetDataMap = {
-    exp: { samples: [], levelOffset: 0, levelUps: 0 },
-    meso: { samples: [] },
+    exp: { unit: 'points', samples: [], current: null, required: 0, level: 1, gained: 0, startedAt: null, migrated: false, source: 'manual' },
+    meso: { samples: [], potionCosts: 0, potionUses: {}, pickups: 0, loot: [], trackingStartedAt: null },
     session: { running: false, startedAt: 0, accumulatedMs: 0 },
     timers: { endsAt: {} },
     boss: { nextAt: {} },
     notes: { text: '', items: [], lastResetKey: '' },
-    kills: { count: 0, startedAt: 0 },
     image: { images: [], index: 0 }
   };
   return data[type];
@@ -87,7 +85,7 @@ export function defaultPlacement(type: WidgetType, index: number): Placement {
   const size = DEFAULT_SIZES[type];
   const col = index % 4;
   const row = Math.floor(index / 4);
-  return { x: 40 + col * 290, y: 80 + row * 280, w: size.w, h: size.h, visible: true, opacity: 0.8, scale: 1 };
+  return { x: 40 + col * 330, y: 80 + row * 340, w: size.w, h: size.h, visible: true, opacity: 0.8, scale: 1 };
 }
 
 export const DEFAULT_HOTKEYS: Settings['hotkeys'] = {
@@ -108,12 +106,14 @@ export function defaultSettings(): Settings {
     overlayVisible: true,
     soundEnabled: true,
     launchAtLogin: false,
-    gameDataPath: DEFAULT_GAME_DATA_PATH
+    gameDataPath: DEFAULT_GAME_DATA_PATH,
+    gameTracking: { sourceId: '', windowName: '', region: { ...DEFAULT_GAIN_REGION }, expWidgetId: '', mesoWidgetId: '',
+      apiVersion: '62', priceOverrides: {} }
   };
 }
 
 export function defaultState(): PersistedState {
-  const starters: WidgetType[] = ['exp', 'session', 'timers', 'kills'];
+  const starters: WidgetType[] = ['exp', 'meso', 'session', 'timers'];
   const widgets = starters.map((t) => createWidget(t));
   const profile: LayoutProfile = {
     id: newId(),
@@ -136,6 +136,26 @@ function isObj(v: unknown): v is Record<string, unknown> {
 
 function num(v: unknown, fallback: number, min = -Infinity, max = Infinity): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+}
+
+function normalizePotions(raw: unknown): PotionTracker[] {
+  if (!Array.isArray(raw)) return [];
+  const result: PotionTracker[] = [];
+  for (const p of raw) {
+    if (!isObj(p) || typeof p.id !== 'string' || typeof p.name !== 'string' ||
+        typeof p.itemId !== 'number' || !Number.isSafeInteger(p.itemId) || p.itemId <= 0 ||
+        result.some(existing => existing.id === p.id)) continue;
+    const r = isObj(p.region) ? p.region : {};
+    result.push({
+      id: p.id, itemId: p.itemId, name: p.name,
+      unitCost: Math.round(num(p.unitCost, 0, 0, 1e9)),
+      sourceId: typeof p.sourceId === 'string' ? p.sourceId : '',
+      region: { x: num(r.x, 0, 0, 1), y: num(r.y, 0, 0, 1),
+        width: num(r.width, 0, 0, 1), height: num(r.height, 0, 0, 1) }
+    });
+    if (result.length === 8) break;
+  }
+  return result;
 }
 
 export function clampPlacement(p: Partial<Placement> | undefined, fallback: Placement): Placement {
@@ -171,6 +191,25 @@ export function normalizeState(raw: unknown): PersistedState {
         config: { ...defaultConfig(type), ...(isObj(w.config) ? w.config : {}) },
         data: { ...defaultData(type), ...(isObj(w.data) ? w.data : {}) }
       } as WidgetDef;
+      if (type === 'exp' && (!isObj(w.data) || w.data.unit !== 'points')) {
+        widgets[id] = { ...createWidget('exp'), id, title: widgets[id]!.title,
+          data: { ...defaultData('exp'), migrated: true } };
+      }
+      const widget = widgets[id];
+      if (widget?.type === 'meso') {
+        const data = isObj(w.data) ? w.data : {};
+        const uses = isObj(data.potionUses) ? data.potionUses : {};
+        widget.config.potions = normalizePotions(isObj(w.config) ? w.config.potions : undefined);
+        widget.data.potionCosts = num(data.potionCosts, 0, 0);
+        widget.data.potionUses = Object.fromEntries(Object.entries(uses).filter((entry): entry is [string, number] =>
+          typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0));
+        widget.data.pickups = num(data.pickups, 0, 0);
+        widget.data.trackingStartedAt = typeof data.trackingStartedAt === 'number' ? num(data.trackingStartedAt, 0, 0) : null;
+        widget.data.loot = Array.isArray(data.loot) ? data.loot.filter(isObj).filter(l =>
+          typeof l.name === 'string' && typeof l.quantity === 'number' && Number.isSafeInteger(l.quantity) && l.quantity > 0)
+          .map(l => ({ name: String(l.name), quantity: Number(l.quantity), unitValue: typeof l.unitValue === 'number' ? num(l.unitValue, 0, 0) : null,
+            itemId: typeof l.itemId === 'number' ? l.itemId : null })) : [];
+      }
     }
   }
 
@@ -207,6 +246,18 @@ export function normalizeState(raw: unknown): PersistedState {
 
   const s = isObj(raw.settings) ? raw.settings : {};
   const defaults = defaultSettings();
+  const tracking = isObj(s.gameTracking) ? s.gameTracking : {};
+  const prices = isObj(tracking.priceOverrides) ? tracking.priceOverrides : {};
+  const gameTracking: Settings['gameTracking'] = {
+    sourceId: typeof tracking.sourceId === 'string' ? tracking.sourceId : '',
+    windowName: typeof tracking.windowName === 'string' ? tracking.windowName : '',
+    region: validRegion(tracking.region) ? tracking.region : { ...DEFAULT_GAIN_REGION },
+    expWidgetId: typeof tracking.expWidgetId === 'string' ? tracking.expWidgetId : '',
+    mesoWidgetId: typeof tracking.mesoWidgetId === 'string' ? tracking.mesoWidgetId : '',
+    apiVersion: typeof tracking.apiVersion === 'string' ? tracking.apiVersion : '62',
+    priceOverrides: Object.fromEntries(Object.entries(prices).filter((entry): entry is [string, number] =>
+      typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0))
+  };
   const hotkeys = { ...defaults.hotkeys };
   if (isObj(s.hotkeys)) {
     for (const action of HOTKEY_ACTIONS) {
@@ -228,7 +279,8 @@ export function normalizeState(raw: unknown): PersistedState {
       overlayVisible: typeof s.overlayVisible === 'boolean' ? s.overlayVisible : defaults.overlayVisible,
       soundEnabled: typeof s.soundEnabled === 'boolean' ? s.soundEnabled : defaults.soundEnabled,
       launchAtLogin: typeof s.launchAtLogin === 'boolean' ? s.launchAtLogin : defaults.launchAtLogin,
-      gameDataPath: typeof s.gameDataPath === 'string' && s.gameDataPath.trim() ? s.gameDataPath.trim() : defaults.gameDataPath
+      gameDataPath: typeof s.gameDataPath === 'string' && s.gameDataPath.trim() ? s.gameDataPath.trim() : defaults.gameDataPath,
+      gameTracking
     }
   };
 }

@@ -1,37 +1,55 @@
-import type { ReactNode } from 'react';
-import { etaMs, formatDuration, formatNumber, parseAmount, ratePerHour } from '../../../shared/time.ts';
+import { useEffect, useState, type ReactNode } from 'react';
+import { etaMs, formatDuration, formatNumber, parseAmount, ratePerHour, rollingPerMinute } from '../../../shared/time.ts';
 import { EntryInput, Stat, type WidgetProps } from './common.tsx';
 
 export function ExpWidget({ w, dispatch, now }: WidgetProps<'exp'>): ReactNode {
-  const { samples, levelOffset, levelUps } = w.data;
-  const last = samples.at(-1);
-  const first = samples[0];
-  const current = last ? last.value - levelOffset : null;
-  const rate = ratePerHour(samples);
-  const eta = current === null ? null : etaMs(100 - current, rate);
-  const elapsed = first ? now - first.t : 0;
+  const { samples, current, required, gained, startedAt, migrated } = w.data;
+  const [levelInput, setLevel] = useState(String(w.data.level));
+  const [currentInput, setCurrent] = useState('');
+  const [requiredInput, setRequired] = useState(required ? String(required) : '');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setLevel(String(w.data.level));
+    setRequired(w.data.required ? String(w.data.required) : '');
+    setCurrent(w.data.current === null ? '' : String(w.data.current));
+  }, [w.data.level, w.data.required, w.data.current]);
+  const rate = rollingPerMinute(samples, now, 60_000);
+  const average = rollingPerMinute(samples, now, 600_000);
+  const eta = current === null ? null : etaMs(required - current, average === null ? null : average * 60);
 
   return (
     <div className="widget-body">
-      <div className="big">{current === null ? '—' : `${current.toFixed(2)}%`}</div>
+      <div className="big">{w.data.source === 'notifications' ? formatNumber(gained) : current === null ? '—' : formatNumber(current)} <span className="hint">EXP</span></div>
       <div className="stats">
-        <Stat label="EXP/hr" value={rate === null ? '—' : `${rate.toFixed(2)}%`} />
+        <Stat label="EXP/min" value={rate === null ? '—' : formatNumber(rate)} />
+        <Stat label="10-min avg/min" value={average === null ? '—' : formatNumber(average)} />
+        <Stat label={w.data.source === 'notifications' ? 'Session EXP gained' : 'Session EXP (net)'} value={startedAt === null ? '—' : gained.toLocaleString('en-US')} />
         <Stat label="To level" value={eta === null ? '—' : formatDuration(eta, true)} />
-        <Stat label="Gained" value={first && last ? `${(last.value - first.value).toFixed(2)}%` : '—'} />
-        <Stat label="Tracking" value={first ? formatDuration(elapsed, true) : '—'} />
-        {levelUps > 0 && <Stat label="Level ups" value={levelUps} className="good" />}
+        <Stat label="Tracking" value={startedAt !== null ? formatDuration(now - startedAt, true) : '—'} />
       </div>
-      <EntryInput
-        placeholder="Current EXP % (e.g. 42.5)"
-        onSubmit={(v) => {
-          const n = parseAmount(v.replace('%', ''));
-          if (n === null || n > 100) return false;
-          dispatch({ type: 'rate/sample', id: w.id, value: n, at: Date.now() });
-          return true;
-        }}
-      />
+      {migrated && <p className="hint">Old percentage history was cleared; enter a points baseline.</p>}
+      {w.data.source === 'notifications' ? <p className="hint">Automatic gain notifications. Losses and hidden notifications are not included.</p> : <form className="exp-entry" onSubmit={event => {
+        event.preventDefault();
+        const value = parseAmount(currentInput);
+        const needed = parseAmount(requiredInput);
+        const level = Number(levelInput);
+        if (value === null || needed === null || ![value, needed, level].every(Number.isSafeInteger) ||
+            value < 0 || needed <= value || level < 1 ||
+            (current !== null && (level < w.data.level || level > w.data.level + 1))) {
+          setError('Enter whole EXP points below the level requirement. Record each level up, or reset after skipped levels.');
+          return;
+        }
+        dispatch({ type: 'exp/sample', id: w.id, value, required: needed, level, at: Date.now() });
+        setError('');
+      }}>
+        <label className="hint">Level<input aria-label="Level" placeholder="Level" value={levelInput} onChange={e => setLevel(e.target.value)} /></label>
+        <label className="hint">Current EXP<input aria-label="Current EXP points" placeholder="Current EXP" value={currentInput} onChange={e => setCurrent(e.target.value)} /></label>
+        <label className="hint">EXP to level<input aria-label="EXP needed for level" placeholder="EXP to level" value={requiredInput} onChange={e => setRequired(e.target.value)} /></label>
+        <button type="submit">Record EXP</button>
+      </form>}
+      {error && <p role="alert" className="hint">{error}</p>}
       <div className="row">
-        <span className="hint">{samples.length} samples</span>
+        <span className="hint">{startedAt !== null && now - startedAt < 600_000 ? '10-min average warming up' : w.data.source === 'notifications' ? 'Notification readings' : 'Manual readings'}</span>
         <button className="ghost" onClick={() => dispatch({ type: 'rate/reset', id: w.id })}>
           Reset
         </button>
@@ -40,30 +58,39 @@ export function ExpWidget({ w, dispatch, now }: WidgetProps<'exp'>): ReactNode {
   );
 }
 
-export function MesoWidget({ w, dispatch, now }: WidgetProps<'meso'>): ReactNode {
+export function MesoWidget({ w, dispatch, now, potionStatus }: WidgetProps<'meso'>): ReactNode {
   const { samples } = w.data;
   const first = samples[0];
   const last = samples.at(-1);
-  const rate = ratePerHour(samples);
-  const gained = first && last ? last.value - first.value : 0;
+  const automatic = w.data.trackingStartedAt !== null;
+  const lootValue = w.data.loot.reduce((sum, item) => sum + item.quantity * (item.unitValue ?? 0), 0);
+  const gained = automatic ? w.data.pickups + lootValue : first && last ? last.value - first.value : 0;
+  const elapsed = automatic ? now - w.data.trackingStartedAt! : first ? now - first.t : 0;
+  const rate = automatic ? elapsed > 0 ? gained * 3600000 / elapsed : null : ratePerHour(samples);
   const goal = w.config.goal;
   const eta = goal > 0 && last ? etaMs(goal - last.value, rate) : null;
 
   return (
     <div className="widget-body">
-      <div className="big">{last ? formatNumber(last.value) : '—'}</div>
+      <div className="big">{automatic ? formatNumber(gained) : last ? formatNumber(last.value) : '—'}</div>
       <div className="stats">
         <Stat label="Mesos/hr" value={rate === null ? '—' : formatNumber(rate)} className={rate !== null && rate < 0 ? 'bad' : ''} />
-        <Stat label="Gained" value={first ? formatNumber(gained) : '—'} className={gained < 0 ? 'bad' : ''} />
-        <Stat label="Tracking" value={first ? formatDuration(now - first.t, true) : '—'} />
-        {goal > 0 && <Stat label="Goal ETA" value={last && last.value >= goal ? 'Reached!' : eta === null ? '—' : formatDuration(eta, true)} />}
+        <Stat label="Gained (incl. loot)" value={automatic || first ? formatNumber(gained) : '—'} className={gained < 0 ? 'bad' : ''} />
+        <Stat label="Tracking" value={automatic || first ? formatDuration(elapsed, true) : '—'} />
+        {automatic && <><Stat label="Meso pickups" value={formatNumber(w.data.pickups)} /><Stat label="Loot value (est.)" value={formatNumber(lootValue)} /></>}
+        <Stat label="Potion cost (est.)" value={formatNumber(w.data.potionCosts)} className="bad" />
+        <Stat label="Farming net (est.)" value={automatic || first ? formatNumber(gained - w.data.potionCosts) : '—'} />
+        {!automatic && goal > 0 && <Stat label="Goal ETA" value={last && last.value >= goal ? 'Reached!' : eta === null ? '—' : formatDuration(eta, true)} />}
       </div>
-      {goal > 0 && last && (
+      {w.data.loot.some(item => item.unitValue === null) && <p className="hint">Unvalued loot excluded. Set prices in Settings.</p>}
+      <button className="ghost" onClick={() => window.mscw.openControl(w.id)}>Configure potion detection</button>
+      {w.config.potions.length > 0 && <p className="hint">{potionStatus?.message ?? 'Potion detection stopped.'}</p>}
+      {!automatic && goal > 0 && last && (
         <div className="bar">
           <div className="bar-fill" style={{ width: `${Math.min(100, (last.value / goal) * 100)}%` }} />
         </div>
       )}
-      <EntryInput
+      {!automatic && <EntryInput
         placeholder="Current mesos (e.g. 1.25m)"
         onSubmit={(v) => {
           const n = parseAmount(v);
@@ -71,9 +98,9 @@ export function MesoWidget({ w, dispatch, now }: WidgetProps<'meso'>): ReactNode
           dispatch({ type: 'rate/sample', id: w.id, value: n, at: Date.now() });
           return true;
         }}
-      />
+      />}
       <div className="row">
-        <span className="hint">{samples.length} samples</span>
+        <span className="hint">{automatic ? 'Automatic notification gains' : `${samples.length} samples`}</span>
         <button className="ghost" onClick={() => dispatch({ type: 'rate/reset', id: w.id })}>
           Reset
         </button>

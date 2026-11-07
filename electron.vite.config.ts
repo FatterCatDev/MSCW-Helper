@@ -11,7 +11,8 @@ export default defineConfig({
       rolldownOptions: {
         input: {
           overlay: resolve(import.meta.dirname, 'src/renderer/overlay.html'),
-          control: resolve(import.meta.dirname, 'src/renderer/control.html')
+          control: resolve(import.meta.dirname, 'src/renderer/control.html'),
+          capture: resolve(import.meta.dirname, 'src/renderer/capture.html')
         }
       }
     }
