@@ -29,9 +29,10 @@ const api: MscwApi = {
   startPotions: (widgetId) => ipcRenderer.invoke(IPC.startPotions, widgetId),
   stopPotions: (widgetId) => ipcRenderer.invoke(IPC.stopPotions, widgetId),
   startGameTracking: () => ipcRenderer.invoke(IPC.startGameTracking),
+  initializeGame: (sourceId) => ipcRenderer.invoke(IPC.initializeGame, sourceId),
   stopGameTracking: () => ipcRenderer.invoke(IPC.stopGameTracking),
   captureConfig: () => ipcRenderer.invoke(IPC.captureConfig),
-  captureFrame: (image) => ipcRenderer.send(IPC.captureFrame, image),
+  captureFrame: (image, width, height) => ipcRenderer.send(IPC.captureFrame, image, width, height),
   captureError: (message) => ipcRenderer.send(IPC.captureError, message),
   quit: () => ipcRenderer.send(IPC.quit)
 };

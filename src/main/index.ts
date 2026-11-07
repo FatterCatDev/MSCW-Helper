@@ -41,7 +41,7 @@ let potionCapture: PotionCapture;
 let gameTracking: GameTracking;
 let captureWindow: BrowserWindow | null = null;
 let captureConfig: GameTrackingConfig | null = null;
-const runtime: RuntimeState = { editMode: false, hotkeyErrors: {}, displays: [], potionTracking: {},
+const runtime: RuntimeState = { initializing: true, editMode: false, hotkeyErrors: {}, displays: [], potionTracking: {},
   gameTracking: { running: false, fps: 0, frames: 0, message: 'Automatic tracking stopped.' } };
 
 function fullState(): AppState {
@@ -58,7 +58,7 @@ function broadcast(): void {
 function dispatch(action: Action): void {
   if (action.type === 'rate/reset' || action.type === 'potion/reset') potionCapture.stop(action.id);
   if (action.type === 'rate/reset' && runtime.gameTracking.running &&
-      [store.get().settings.gameTracking.expWidgetId, store.get().settings.gameTracking.mesoWidgetId].includes(action.id)) gameTracking.stop();
+      store.get().settings.gameTracking.expWidgetId === action.id) gameTracking.stop();
   const prev = store.get();
   let next = reducer(prev, action);
   if (action.type === 'settings/set' && action.patch.gameTracking) {
@@ -79,7 +79,7 @@ function dispatch(action: Action): void {
 function applySideEffects(prev: PersistedState | null, next: PersistedState): void {
   if (runtime.gameTracking.running && prev &&
       (prev.settings.gameTracking !== next.settings.gameTracking ||
-       !next.widgets[next.settings.gameTracking.expWidgetId] || !next.widgets[next.settings.gameTracking.mesoWidgetId])) {
+       !next.widgets[next.settings.gameTracking.expWidgetId])) {
     gameTracking.stop('Tracking configuration changed. Start again to begin a new session.');
   }
   for (const [id, status] of Object.entries(runtime.potionTracking)) {
@@ -103,6 +103,7 @@ function applySideEffects(prev: PersistedState | null, next: PersistedState): vo
 }
 
 function setEditMode(on: boolean): void {
+  if (runtime.initializing) return;
   if (runtime.editMode === on) return;
   runtime.editMode = on;
   if (on && !store.get().settings.overlayVisible) dispatch({ type: 'settings/set', patch: { overlayVisible: true } });
@@ -219,12 +220,12 @@ function createOverlay(): void {
 
 function createControl(): void {
   control = new BrowserWindow({
-    width: 960,
-    height: 700,
-    minWidth: 720,
+    width: runtime.initializing ? 640 : 960,
+    height: runtime.initializing ? 520 : 700,
+    minWidth: runtime.initializing ? 520 : 720,
     minHeight: 520,
     show: false,
-    title: 'MSCW Helper',
+    title: runtime.initializing ? 'MSCW Helper Initialization' : 'MSCW Helper',
     icon: createAppIcon(32),
     backgroundColor: '#14161c',
     autoHideMenuBar: true,
@@ -234,6 +235,10 @@ function createControl(): void {
   hardenWebContents(control.webContents);
   control.once('ready-to-show', () => control?.show());
   control.on('close', (e) => {
+    if (runtime.initializing && !quitting) {
+      app.quit();
+      return;
+    }
     if (!quitting) {
       e.preventDefault();
       control?.hide();
@@ -260,11 +265,12 @@ function updateTray(): void {
   const menu = Menu.buildFromTemplate([
     { label: 'Open MSCW Helper', click: () => showControl() },
     { type: 'separator' },
-    { label: 'Show overlay', type: 'checkbox', checked: s.settings.overlayVisible, accelerator: s.settings.hotkeys.toggleOverlay || undefined, click: () => runHotkey('toggleOverlay') },
-    { label: 'Edit layout', type: 'checkbox', checked: runtime.editMode, accelerator: s.settings.hotkeys.toggleEdit || undefined, click: () => runHotkey('toggleEdit') },
-    { label: 'Click-through', type: 'checkbox', checked: s.settings.clickThrough, accelerator: s.settings.hotkeys.toggleClickThrough || undefined, click: () => runHotkey('toggleClickThrough') },
+    { label: 'Show overlay', enabled: !runtime.initializing, type: 'checkbox', checked: !runtime.initializing && s.settings.overlayVisible, accelerator: s.settings.hotkeys.toggleOverlay || undefined, click: () => runHotkey('toggleOverlay') },
+    { label: 'Edit layout', enabled: !runtime.initializing, type: 'checkbox', checked: runtime.editMode, accelerator: s.settings.hotkeys.toggleEdit || undefined, click: () => runHotkey('toggleEdit') },
+    { label: 'Click-through', enabled: !runtime.initializing, type: 'checkbox', checked: s.settings.clickThrough, accelerator: s.settings.hotkeys.toggleClickThrough || undefined, click: () => runHotkey('toggleClickThrough') },
     {
       label: 'Layout',
+      enabled: !runtime.initializing,
       submenu: s.profiles.map((p) => ({
         label: p.name,
         type: 'radio' as const,
@@ -288,6 +294,7 @@ function createTray(): void {
 // ---------------------------------------------------------------- hotkeys
 
 function runHotkey(action: HotkeyAction): void {
+  if (runtime.initializing && action !== 'openControl') return;
   const s = store.get().settings;
   switch (action) {
     case 'toggleOverlay':
@@ -426,13 +433,48 @@ function registerIpc(): void {
   const requireControl = (e: IpcMainInvokeEvent): void => {
     if (!control || BrowserWindow.fromWebContents(e.sender) !== control) throw new Error('Game asset access is only available from the control panel.');
   };
+  ipcMain.handle(IPC.initializeGame, async (e, sourceId: unknown) => {
+    requireControl(e);
+    if (!runtime.initializing) throw new Error('The app is already initialized.');
+    if (typeof sourceId !== 'string' || !/^window:\d+:\d+$/.test(sourceId)) throw new Error('Choose a game window first.');
+    const source = (await listGameWindows()).find(window => window.id === sourceId);
+    if (!source || source.thumbnail.isEmpty()) throw new Error('The selected game window is unavailable. Refresh and select it again.');
+    const saved = store.get().settings.gameTracking;
+    const target = (type: 'exp', savedId: string): string => {
+      if (store.get().widgets[savedId]?.type === type) return savedId;
+      let widget = Object.values(store.get().widgets).find(w => w.type === type);
+      if (!widget) {
+        dispatch({ type: 'widget/add', widgetType: type });
+        widget = Object.values(store.get().widgets).find(w => w.type === type);
+      }
+      if (!widget) throw new Error(`Could not create the ${type} tracker.`);
+      return widget.id;
+    };
+    const config = { ...saved, sourceId, windowName: source.name,
+      expWidgetId: target('exp', saved.expWidgetId) };
+    dispatch({ type: 'settings/set', patch: { gameTracking: config } });
+    await gameTracking.start(config);
+    if (!runtime.gameTracking.running) throw new Error(runtime.gameTracking.message);
+    runtime.initializing = false;
+    dispatch({ type: 'settings/set', patch: { overlayVisible: true } });
+    for (const id of [config.expWidgetId]) {
+      dispatch({ type: 'placement/set', id, patch: { visible: true } });
+    }
+    createOverlay();
+    control?.hide();
+    control?.setTitle('MSCW Helper');
+    control?.setMinimumSize(720, 520);
+    control?.setSize(960, 700);
+    updateTray();
+    broadcast();
+  });
   ipcMain.handle(IPC.startGameTracking, async e => {
     requireControl(e);
+    if (runtime.initializing) throw new Error('Choose a game window and click Start in Initialization first.');
     const config = store.get().settings.gameTracking;
-    if (store.get().widgets[config.expWidgetId]?.type !== 'exp' || store.get().widgets[config.mesoWidgetId]?.type !== 'meso') {
-      throw new Error('Choose an EXP Tracker and Meso Tracker first.');
+    if (store.get().widgets[config.expWidgetId]?.type !== 'exp') {
+      throw new Error('Choose an EXP Tracker first.');
     }
-    potionCapture.stop(config.mesoWidgetId, 'Stopped for a new gain session. Start potion detection again if needed.');
     await gameTracking.start(config);
   });
   ipcMain.handle(IPC.stopGameTracking, e => { requireControl(e); gameTracking.stop(); });
@@ -440,8 +482,8 @@ function registerIpc(): void {
     if (!captureWindow || e.sender !== captureWindow.webContents || !captureConfig) throw new Error('Capture configuration is only available to the capture window.');
     return captureConfig;
   });
-  ipcMain.on(IPC.captureFrame, (e, image: unknown) => {
-    if (captureWindow && e.sender === captureWindow.webContents) gameTracking.frame(image);
+  ipcMain.on(IPC.captureFrame, (e, image: unknown, width: unknown, height: unknown) => {
+    if (captureWindow && e.sender === captureWindow.webContents) gameTracking.frame(image, width, height);
   });
   ipcMain.on(IPC.captureError, (e, message: unknown) => {
     if (captureWindow && e.sender === captureWindow.webContents && typeof message === 'string') {
@@ -504,7 +546,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getState, (e) => (fromOurWindow(e) ? fullState() : null));
   ipcMain.on(IPC.dispatch, (e, action: unknown) => {
     if (fromOurWindow(e) && isAction(action) &&
-        !['potion/used', 'tracking/start', 'tracking/gain', 'loot/value'].includes(action.type)) dispatch(action);
+        !['potion/used', 'exp/start', 'exp/status', 'tracking/start', 'tracking/gain', 'loot/value'].includes(action.type)) dispatch(action);
   });
   ipcMain.on(IPC.setEditMode, (e, on: unknown) => {
     if (fromOurWindow(e) && typeof on === 'boolean') setEditMode(on);
@@ -598,7 +640,6 @@ function start(): void {
   }
 
   registerIpc();
-  createOverlay();
   createControl();
   createTray();
   applySideEffects(null, store.get());

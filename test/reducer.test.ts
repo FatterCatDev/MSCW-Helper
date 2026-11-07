@@ -140,8 +140,8 @@ test('EXP session total survives rolling history pruning and reset starts a new 
   const d = widgetOfType(s, 'exp').data;
   assert.equal(d.gained, 3000);
   assert.equal(d.startedAt, 0);
-  assert.equal(d.samples[0]!.t, 19 * 60_000);
-  assert.equal(d.samples.length, 12);
+  assert.equal(d.samples[0]!.t, 18 * 60_000);
+  assert.equal(d.samples.length, 13);
   assert.deepEqual(widgetOfType(normalizeState(s), 'exp').data, d);
   s = run(s, { type: 'rate/reset', id });
   assert.equal(widgetOfType(s, 'exp').data.startedAt, null);

@@ -1,9 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { etaMs, formatDuration, formatNumber, parseAmount, ratePerHour, rollingPerMinute } from '../../../shared/time.ts';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { etaMs, expRateHistory, formatDuration, formatNumber, parseAmount, ratePerHour, rollingPerMinute } from '../../../shared/time.ts';
 import { EntryInput, Stat, type WidgetProps } from './common.tsx';
+import { useNow } from '../common/state.ts';
 
-export function ExpWidget({ w, dispatch, now }: WidgetProps<'exp'>): ReactNode {
+export function ExpWidget({ w, dispatch }: WidgetProps<'exp'>): ReactNode {
   const { samples, current, required, gained, startedAt, migrated } = w.data;
+  const tick = useNow(1000);
+  const now = Math.max(tick, samples.at(-1)?.t ?? tick);
   const [levelInput, setLevel] = useState(String(w.data.level));
   const [currentInput, setCurrent] = useState('');
   const [requiredInput, setRequired] = useState(required ? String(required) : '');
@@ -16,6 +19,19 @@ export function ExpWidget({ w, dispatch, now }: WidgetProps<'exp'>): ReactNode {
   const rate = rollingPerMinute(samples, now, 60_000);
   const average = rollingPerMinute(samples, now, 600_000);
   const eta = current === null ? null : etaMs(required - current, average === null ? null : average * 60);
+  const graphSecond = Math.floor(now / 1000);
+  const history = useMemo(() => expRateHistory(samples, graphSecond * 1000), [samples, graphSecond]);
+  const values = history.flatMap(point => point.value === null ? [] : [point.value]);
+  const low = Math.min(0, ...values);
+  const high = Math.max(1, ...values);
+  const graphY = (value: number): number => 14 + (high - value) / (high - low) * 78;
+  let connected = false;
+  const path = history.map((point, index) => {
+    if (point.value === null) { connected = false; return ''; }
+    const command = connected ? 'L' : 'M';
+    connected = true;
+    return `${command}${42 + index / 600 * 350},${graphY(point.value)}`;
+  }).join(' ');
 
   return (
     <div className="widget-body">
@@ -24,11 +40,28 @@ export function ExpWidget({ w, dispatch, now }: WidgetProps<'exp'>): ReactNode {
         <Stat label="EXP/min" value={rate === null ? '—' : formatNumber(rate)} />
         <Stat label="10-min avg/min" value={average === null ? '—' : formatNumber(average)} />
         <Stat label={w.data.source === 'notifications' ? 'Session EXP gained' : 'Session EXP (net)'} value={startedAt === null ? '—' : gained.toLocaleString('en-US')} />
-        <Stat label="To level" value={eta === null ? '—' : formatDuration(eta, true)} />
+        <Stat label={w.data.source === 'status-bar' ? 'To level (est.)' : 'To level'} value={eta === null ? '—' : formatDuration(eta, true)} />
         <Stat label="Tracking" value={startedAt !== null ? formatDuration(now - startedAt, true) : '—'} />
       </div>
+      <figure className="exp-rate-graph">
+        <figcaption>EXP/min - last 10 minutes</figcaption>
+        <svg viewBox="0 0 400 116" role="img" aria-label="EXP per minute over the last ten minutes, sampled every second">
+          <title>Trailing one-minute EXP rate, one point per second. Negative values indicate net EXP loss.</title>
+          {[14, 53, 92].map(y => <line key={y} x1="42" x2="392" y1={y} y2={y} className="graph-grid" />)}
+          <line x1="42" x2="392" y1={graphY(0)} y2={graphY(0)} className="graph-zero" />
+          <text x="38" y="18" textAnchor="end">{formatNumber(high)}</text>
+          <text x="38" y="96" textAnchor="end">{formatNumber(low)}</text>
+          <text x="42" y="111">-10m</text>
+          <text x="217" y="111" textAnchor="middle">-5m</text>
+          <text x="392" y="111" textAnchor="end">Now</text>
+          <path d={path} className="graph-line" />
+          {!values.length && <text x="217" y="55" textAnchor="middle">Waiting for EXP readings</text>}
+        </svg>
+      </figure>
       {migrated && <p className="hint">Old percentage history was cleared; enter a points baseline.</p>}
-      {w.data.source === 'notifications' ? <p className="hint">Automatic gain notifications. Losses and hidden notifications are not included.</p> : <form className="exp-entry" onSubmit={event => {
+      {w.data.source === 'status-bar' ? <p className="hint">Level {w.data.level} · {w.data.percent?.toFixed(2) ?? '—'}% · Requirement ~{formatNumber(required)} EXP.
+        Automatic status-bar readings; session includes EXP losses. ETA and level-up rollover use an estimated requirement.</p> :
+      w.data.source === 'notifications' ? <p className="hint">Automatic gain notifications. Losses and hidden notifications are not included.</p> : <form className="exp-entry" onSubmit={event => {
         event.preventDefault();
         const value = parseAmount(currentInput);
         const needed = parseAmount(requiredInput);
@@ -49,7 +82,7 @@ export function ExpWidget({ w, dispatch, now }: WidgetProps<'exp'>): ReactNode {
       </form>}
       {error && <p role="alert" className="hint">{error}</p>}
       <div className="row">
-        <span className="hint">{startedAt !== null && now - startedAt < 600_000 ? '10-min average warming up' : w.data.source === 'notifications' ? 'Notification readings' : 'Manual readings'}</span>
+        <span className="hint">{startedAt !== null && now - startedAt < 600_000 ? '10-min average warming up' : w.data.source === 'status-bar' ? 'Status-bar readings' : w.data.source === 'notifications' ? 'Notification readings' : 'Manual readings'}</span>
         <button className="ghost" onClick={() => dispatch({ type: 'rate/reset', id: w.id })}>
           Reset
         </button>
@@ -83,6 +116,7 @@ export function MesoWidget({ w, dispatch, now, potionStatus }: WidgetProps<'meso
         {!automatic && goal > 0 && <Stat label="Goal ETA" value={last && last.value >= goal ? 'Reached!' : eta === null ? '—' : formatDuration(eta, true)} />}
       </div>
       {w.data.loot.some(item => item.unitValue === null) && <p className="hint">Unvalued loot excluded. Set prices in Settings.</p>}
+      {automatic && <p className="hint">Retained previous notification totals. Automatic meso/loot tracking is currently disabled.</p>}
       <button className="ghost" onClick={() => window.mscw.openControl(w.id)}>Configure potion detection</button>
       {w.config.potions.length > 0 && <p className="hint">{potionStatus?.message ?? 'Potion detection stopped.'}</p>}
       {!automatic && goal > 0 && last && (

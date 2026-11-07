@@ -1,7 +1,7 @@
 import { useState, type PointerEvent, type ReactNode } from 'react';
 import type { AppState, CapturePreview, CaptureRegion, GameTrackingConfig } from '../../../shared/types.ts';
 import type { Dispatch } from '../common/state.ts';
-import { DEFAULT_GAIN_REGION } from '../../../shared/game-tracking.ts';
+import { DEFAULT_EXP_REGION, DEFAULT_LEVEL_REGION } from '../../../shared/game-tracking.ts';
 
 export function GameTrackingSettings({ state, dispatch }: { state: AppState; dispatch: Dispatch }): ReactNode {
   const config = state.settings.gameTracking;
@@ -11,6 +11,7 @@ export function GameTrackingSettings({ state, dispatch }: { state: AppState; dis
   const [busy, setBusy] = useState(false);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const [region, setRegion] = useState<CaptureRegion | null>(null);
+  const [field, setField] = useState<'exp' | 'level'>('exp');
   const update = (patch: Partial<GameTrackingConfig>): void =>
     dispatch({ type: 'settings/set', patch: { gameTracking: { ...config, ...patch } } });
   async function run(work: () => Promise<void>): Promise<void> {
@@ -33,12 +34,14 @@ export function GameTrackingSettings({ state, dispatch }: { state: AppState; dis
   const selected = previews.find(p => p.id === config.sourceId);
   const meso = state.widgets[config.mesoWidgetId];
   return <section>
-    <h3>Automatic game-window tracking</h3>
+    <h3>Automatic game-window EXP tracking</h3>
     <p><strong>{status.running ? status.fps.toFixed(1) : '0.0'} capture FPS / 30 max</strong> — {status.frames} frames</p>
     <p role="status">{status.message}</p>
-    <p className="hint">Captures only the chosen window, not the desktop. OCR reads the right-hand gain notifications.
-      Keep notifications visible. Starting creates a new EXP/pickup/loot session; old visible messages are ignored.
-      Missed or misread notifications can affect totals. FPS measures received video frames, not OCR checks.</p>
+    <p className="hint">Detected game resolution: {status.resolution ? `${status.resolution.width} x ${status.resolution.height}` : 'Waiting for video frames'}.
+      Reader: {status.reader === 'font' ? 'Bitmap font, every captured frame' : 'Waiting for recognizable status digits'}.</p>
+    <p className="hint">Reads the bottom status bar: character level, EXP points and percentage. Select the numeric fields without labels;
+      HP/MP tracking is not enabled yet. The first confirmed reading sets an EXP baseline.
+      Automatic meso/loot tracking is disabled. ETA uses an estimated requirement from points/percentage, not an API-verified table.</p>
     <button disabled={busy || status.running} onClick={() => void run(async () => {
       const windows = await window.mscw.capturePreviews();
       setPreviews(windows);
@@ -48,7 +51,8 @@ export function GameTrackingSettings({ state, dispatch }: { state: AppState; dis
       <select aria-label="Game window" disabled={busy || status.running} value={config.sourceId}
         onChange={e => {
           const win = previews.find(p => p.id === e.target.value);
-          update({ sourceId: e.target.value, windowName: win?.name ?? '', region: { ...DEFAULT_GAIN_REGION } });
+          update({ sourceId: e.target.value, windowName: win?.name ?? '', captureMode: 'status-bar',
+            region: { ...DEFAULT_EXP_REGION }, levelRegion: { ...DEFAULT_LEVEL_REGION } });
           setRegion(null);
         }}>
         <option value="">Select a window...</option>
@@ -57,28 +61,35 @@ export function GameTrackingSettings({ state, dispatch }: { state: AppState; dis
       </select>
     </label>
     {selected && !status.running && <>
-      <p className="hint">Default region matches your video. Drag around the full gain-notification stack if it differs; exclude chat and the status bar.</p>
+      <label className="toggle">Field to select
+        <select value={field} onChange={e => { setField(e.target.value === 'level' ? 'level' : 'exp'); setRegion(null); }}>
+          <option value="exp">EXP points and percentage</option><option value="level">Character level digits</option>
+        </select>
+      </label>
+      <p className="hint">{field === 'exp' ? 'Select only the EXP number and [percentage%], excluding the EXP label and gauge.'
+        : 'Select only the orange level digits, excluding the LV label and character name.'}</p>
       <div className="capture-selector" onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); setAnchor(point(e)); }}
         onPointerMove={drag} onPointerUp={e => { drag(e); setAnchor(null); }} onPointerCancel={() => { setAnchor(null); setRegion(null); }}>
         <img src={selected.image} alt="Selected game window preview" draggable={false} />
-        <div className="capture-selection" style={{ left: `${(region ?? config.region).x * 100}%`,
-          top: `${(region ?? config.region).y * 100}%`, width: `${(region ?? config.region).width * 100}%`,
-          height: `${(region ?? config.region).height * 100}%` }} />
+        <div className="capture-selection" style={{ left: `${(region ?? (field === 'exp' ? config.region : config.levelRegion ?? DEFAULT_LEVEL_REGION)).x * 100}%`,
+          top: `${(region ?? (field === 'exp' ? config.region : config.levelRegion ?? DEFAULT_LEVEL_REGION)).y * 100}%`,
+          width: `${(region ?? (field === 'exp' ? config.region : config.levelRegion ?? DEFAULT_LEVEL_REGION)).width * 100}%`,
+          height: `${(region ?? (field === 'exp' ? config.region : config.levelRegion ?? DEFAULT_LEVEL_REGION)).height * 100}%` }} />
       </div>
-      <button disabled={!region || region.width <= 0 || region.height <= 0} onClick={() => { if (region) update({ region }); setRegion(null); }}>Save notification region</button>
+      <button disabled={!region || region.width <= 0 || region.height <= 0} onClick={() => {
+        if (region) update(field === 'exp' ? { captureMode: 'status-bar', region } : { captureMode: 'status-bar', levelRegion: region });
+        setRegion(null);
+      }}>Save {field === 'exp' ? 'EXP' : 'level'} region</button>
     </>}
-    {(['exp', 'meso'] as const).map(type => <label className="toggle" key={type}>{type === 'exp' ? 'EXP tracker' : 'Meso tracker'}
-      <select aria-label={`${type} tracking widget`} value={type === 'exp' ? config.expWidgetId : config.mesoWidgetId}
-        disabled={busy || status.running} onChange={e => update(type === 'exp' ? { expWidgetId: e.target.value } : { mesoWidgetId: e.target.value })}>
+    <label className="toggle">EXP tracker
+      <select aria-label="exp tracking widget" value={config.expWidgetId}
+        disabled={busy || status.running} onChange={e => update({ expWidgetId: e.target.value })}>
         <option value="">Select tracker...</option>
-        {Object.values(state.widgets).filter(w => w.type === type).map(w => <option value={w.id} key={w.id}>{w.title}</option>)}
+        {Object.values(state.widgets).filter(w => w.type === 'exp').map(w => <option value={w.id} key={w.id}>{w.title}</option>)}
       </select>
-    </label>)}
-    <label className="toggle">GMS API version
-      <input aria-label="Loot API version" value={config.apiVersion} disabled={busy || status.running} onChange={e => update({ apiVersion: e.target.value })} />
     </label>
     <div className="row-left">
-      <button disabled={busy || region !== null || !config.sourceId || !config.expWidgetId || !config.mesoWidgetId}
+      <button disabled={busy || region !== null || !config.sourceId || !config.expWidgetId}
         onClick={() => void run(async () => {
           if (status.running) await window.mscw.stopGameTracking();
           else { setPreviews([]); await window.mscw.startGameTracking(); }

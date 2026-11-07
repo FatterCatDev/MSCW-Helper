@@ -34,6 +34,7 @@ export class PotionCapture {
   private active: { id: string; potions: PotionTracker[]; counts: Map<string, CountState> } | null = null;
   private initializing = false;
   private reading = false;
+  private disposed = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private dispatch: (action: Action) => void;
   private status: (id: string, status: PotionStatus) => void;
@@ -44,6 +45,7 @@ export class PotionCapture {
   }
 
   async start(id: string, potions: PotionTracker[]): Promise<void> {
+    if (this.disposed) throw new Error('MSCW Helper is shutting down.');
     if (this.active || this.initializing || this.reading) throw new Error('Stop the existing potion detector and let its current reading finish before starting another.');
     if (!potions.length || potions.length > 8 || !potions.every(isPotionTracker) ||
         new Set(potions.map(p => p.id)).size !== potions.length) {
@@ -79,6 +81,7 @@ export class PotionCapture {
       throw error;
     } finally {
       this.initializing = false;
+      if (this.disposed) this.terminateWorker();
     }
   }
 
@@ -116,12 +119,20 @@ export class PotionCapture {
       if (this.active === active) this.stop(active.id, error instanceof Error ? error.message : String(error));
     } finally {
       this.reading = false;
+      if (this.disposed) this.terminateWorker();
     }
     if (this.active === active) this.timer = setTimeout(() => void this.tick(), 1500);
   }
 
   dispose(): void {
     if (this.active) this.stop(this.active.id);
-    if (this.worker) void this.worker.terminate().catch((error: unknown) => console.error('[potion-capture] shutdown failed', error));
+    this.disposed = true;
+    if (!this.reading && !this.initializing) this.terminateWorker();
+  }
+
+  private terminateWorker(): void {
+    const worker = this.worker;
+    this.worker = null;
+    if (worker) void worker.terminate().catch((error: unknown) => console.error('[potion-capture] shutdown failed', error));
   }
 }

@@ -22,6 +22,8 @@ export type Action =
   | { type: 'rate/sample'; id: string; value: number; at: number }
   | { type: 'rate/reset'; id: string }
   | { type: 'exp/sample'; id: string; value: number; required: number; level: number; at: number }
+  | { type: 'exp/status'; id: string; value: number; required: number; level: number; percent: number; at: number }
+  | { type: 'exp/start'; id: string }
   | { type: 'tracking/start'; expId: string; mesoId: string; at: number }
   | { type: 'tracking/gain'; expId: string; mesoId: string; exp: number; mesos: number; items: { name: string; quantity: number }[]; at: number }
   | { type: 'loot/value'; id: string; name: string; unitValue: number; itemId: number | null }
@@ -40,7 +42,7 @@ export const ACTION_TYPES: ReadonlySet<string> = new Set<Action['type']>([
   'placement/set', 'profile/create', 'profile/rename', 'profile/delete', 'profile/activate', 'profile/next',
   'settings/set', 'settings/hotkey', 'rate/sample', 'rate/reset', 'session/toggle', 'session/reset',
   'timer/start', 'timer/stop', 'boss/mark', 'boss/clear', 'notes/dailyReset',
-  'exp/sample', 'potion/used', 'potion/reset', 'tracking/start', 'tracking/gain', 'loot/value'
+  'exp/sample', 'exp/status', 'exp/start', 'potion/used', 'potion/reset', 'tracking/start', 'tracking/gain', 'loot/value'
 ]);
 
 export function isAction(v: unknown): v is Action {
@@ -176,9 +178,14 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
         return { ...m, data: { ...m.data, samples: [...m.data.samples, { t: action.at, value: Math.max(0, action.value) }].slice(-500) } };
       });
     }
+    case 'exp/start':
+      return updateWidget(state, action.id, 'exp', e => ({ ...e, data: { ...defaultData('exp'), source: 'status-bar' } }));
     case 'exp/sample':
+    case 'exp/status':
       return updateWidget(state, action.id, 'exp', (e) => {
         if (e.data.source === 'notifications') return e;
+        if (action.type === 'exp/sample' && e.data.source === 'status-bar') return e;
+        if (action.type === 'exp/status' && (!Number.isFinite(action.percent) || action.percent < 0 || action.percent >= 100)) return e;
         if (![action.value, action.required, action.level, action.at].every(Number.isSafeInteger) ||
             action.value < 0 || action.required <= 0 || action.value >= action.required || action.level < 1 ||
             action.at < 0 || (e.data.samples.at(-1) && action.at <= e.data.samples.at(-1)!.t)) return e;
@@ -189,7 +196,9 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
         const gained = previous.gained + delta;
         if (!Number.isSafeInteger(gained)) return e;
         return { ...e, data: { unit: 'points', current: action.value, required: action.required, level: action.level,
-          gained, startedAt: previous.startedAt ?? action.at, migrated: false, source: 'manual',
+          gained, startedAt: previous.startedAt ?? action.at, migrated: false,
+          source: action.type === 'exp/status' ? 'status-bar' : 'manual',
+          ...(action.type === 'exp/status' ? { percent: action.percent } : {}),
           samples: retainRateWindow([...previous.samples, { t: action.at, value: gained }], action.at) } };
       });
     case 'tracking/start': {

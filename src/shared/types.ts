@@ -47,7 +47,8 @@ export interface WidgetDataMap {
     gained: number;
     startedAt: number | null;
     migrated: boolean;
-    source: 'manual' | 'notifications';
+    source: 'manual' | 'notifications' | 'status-bar';
+    percent?: number;
   };
   meso: { samples: RateSample[]; potionCosts: number; potionUses: Record<string, number>;
     pickups: number; loot: LootEntry[]; trackingStartedAt: number | null };
@@ -116,6 +117,8 @@ export interface LootEntry {
 }
 
 export interface GameTrackingConfig {
+  captureMode?: 'status-bar';
+  levelRegion?: CaptureRegion;
   sourceId: string;
   windowName: string;
   region: CaptureRegion;
@@ -130,6 +133,8 @@ export interface GameTrackingStatus {
   fps: number;
   frames: number;
   message: string;
+  resolution?: { width: number; height: number };
+  reader?: 'calibrating' | 'font';
 }
 
 export interface GameAssetImport {
@@ -186,6 +191,7 @@ export interface PersistedState {
 }
 
 export interface RuntimeState {
+  initializing: boolean;
   editMode: boolean;
   /** Accelerators that failed to register, with reason. */
   hotkeyErrors: Record<string, string>;

@@ -10,7 +10,7 @@ import type {
   WidgetType
 } from './types.ts';
 import { HOTKEY_ACTIONS, WIDGET_TYPES } from './types.ts';
-import { DEFAULT_GAIN_REGION, validRegion } from './game-tracking.ts';
+import { DEFAULT_EXP_REGION, DEFAULT_LEVEL_REGION, validRegion } from './game-tracking.ts';
 
 export const WIDGET_LABELS: Record<WidgetType, string> = {
   exp: 'EXP Tracker',
@@ -107,7 +107,7 @@ export function defaultSettings(): Settings {
     soundEnabled: true,
     launchAtLogin: false,
     gameDataPath: DEFAULT_GAME_DATA_PATH,
-    gameTracking: { sourceId: '', windowName: '', region: { ...DEFAULT_GAIN_REGION }, expWidgetId: '', mesoWidgetId: '',
+    gameTracking: { captureMode: 'status-bar', levelRegion: { ...DEFAULT_LEVEL_REGION }, sourceId: '', windowName: '', region: { ...DEFAULT_EXP_REGION }, expWidgetId: '', mesoWidgetId: '',
       apiVersion: '62', priceOverrides: {} }
   };
 }
@@ -249,9 +249,11 @@ export function normalizeState(raw: unknown): PersistedState {
   const tracking = isObj(s.gameTracking) ? s.gameTracking : {};
   const prices = isObj(tracking.priceOverrides) ? tracking.priceOverrides : {};
   const gameTracking: Settings['gameTracking'] = {
+    captureMode: 'status-bar',
+    levelRegion: validRegion(tracking.levelRegion) ? tracking.levelRegion : { ...DEFAULT_LEVEL_REGION },
     sourceId: typeof tracking.sourceId === 'string' ? tracking.sourceId : '',
     windowName: typeof tracking.windowName === 'string' ? tracking.windowName : '',
-    region: validRegion(tracking.region) ? tracking.region : { ...DEFAULT_GAIN_REGION },
+    region: tracking.captureMode === 'status-bar' && validRegion(tracking.region) ? tracking.region : { ...DEFAULT_EXP_REGION },
     expWidgetId: typeof tracking.expWidgetId === 'string' ? tracking.expWidgetId : '',
     mesoWidgetId: typeof tracking.mesoWidgetId === 'string' ? tracking.mesoWidgetId : '',
     apiVersion: typeof tracking.apiVersion === 'string' ? tracking.apiVersion : '62',

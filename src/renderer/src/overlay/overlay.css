@@ -147,6 +147,42 @@ body.overlay-body,
 
 /* ---------- widget bodies ---------- */
 
+.exp-rate-graph {
+  margin: 0;
+  flex: none;
+}
+
+.exp-rate-graph figcaption {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.exp-rate-graph svg {
+  display: block;
+  width: 100%;
+  height: 116px;
+}
+
+.exp-rate-graph text {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.exp-rate-graph .graph-grid {
+  stroke: rgba(255, 255, 255, 0.12);
+}
+
+.exp-rate-graph .graph-zero {
+  stroke: rgba(255, 255, 255, 0.4);
+}
+
+.exp-rate-graph .graph-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
 .widget-body {
   display: flex;
   flex-direction: column;

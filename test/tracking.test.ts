@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { rollingPerMinute } from '../src/shared/time.ts';
+import { expRateHistory, retainRateWindow, rollingPerMinute } from '../src/shared/time.ts';
 import { emptyCountState, observeCount } from '../src/shared/potions.ts';
 import { parsePotionItem } from '../src/main/items.ts';
 
@@ -16,6 +16,31 @@ test('EXP rates warm up over available time and account for losses', () => {
   assert.equal(rollingPerMinute([{ t: 0, value: 0 }, { t: 30_000, value: 100 }], 30_000, 600_000), 200);
   assert.equal(rollingPerMinute([{ t: 0, value: 0 }, { t: 60_000, value: -100 }], 60_000, 60_000), -100);
   assert.equal(rollingPerMinute([{ t: 0, value: 0 }], 60_000, 60_000), null);
+});
+
+test('ten-minute graph has 601 one-second points and shows rises, idle decay and losses', () => {
+  const samples = [{ t: 0, value: 0 }, { t: 30_000, value: 100 }, { t: 90_000, value: 50 }];
+  const points = expRateHistory(samples, 120_456);
+  assert.equal(points.length, 601);
+  assert.equal(points[0]!.t, -480_000);
+  assert.equal(points.at(-1)!.t, 120_000);
+  for (let i = 1; i < points.length; i++) assert.equal(points[i]!.t - points[i - 1]!.t, 1000);
+  const value = (t: number) => points.find(p => p.t === t)!.value;
+  assert.equal(value(29_000), null);
+  assert.equal(value(30_000), 200);
+  assert.equal(value(31_000), 100 * 60000 / 31000);
+  assert.equal(value(90_000), -50);
+  assert.equal(value(120_000), -25);
+  assert.equal(expRateHistory([], 120_000).every(p => p.value === null), true);
+});
+
+test('graph retention preserves a full minute before the ten-minute left edge', () => {
+  const samples = Array.from({ length: 31 }, (_, minute) => ({ t: minute * 60000, value: minute * 100 }));
+  const retained = retainRateWindow(samples, 30 * 60000);
+  const graph = expRateHistory(retained, 30 * 60000);
+  assert.equal(graph[0]!.t, 20 * 60000);
+  assert.equal(graph[0]!.value, 100);
+  assert.equal(graph.at(-1)!.value, 100);
 });
 
 test('potion detection needs two confident matching frames and never charges the same decrease twice', () => {

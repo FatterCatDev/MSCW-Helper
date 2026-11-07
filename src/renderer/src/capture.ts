@@ -1,4 +1,4 @@
-import { CAPTURE_INTERVAL_MS, isolateNotificationText, MAX_CAPTURE_FPS } from '../../shared/game-tracking.ts';
+import { CAPTURE_INTERVAL_MS, DEFAULT_LEVEL_REGION, MAX_CAPTURE_FPS } from '../../shared/game-tracking.ts';
 
 async function capture(): Promise<void> {
   const config = await window.mscw.captureConfig();
@@ -17,25 +17,24 @@ async function capture(): Promise<void> {
   let last = -Infinity;
   const frame: VideoFrameRequestCallback = (now) => {
     if (now - last >= CAPTURE_INTERVAL_MS) {
-      const r = config.region;
-      const x = Math.floor(r.x * video.videoWidth);
-      const y = Math.floor(r.y * video.videoHeight);
-      const width = Math.min(video.videoWidth - x, Math.round(r.width * video.videoWidth));
-      const height = Math.min(video.videoHeight - y, Math.round(r.height * video.videoHeight));
-      if (width < 4 || height < 4) {
-        window.mscw.captureError('The game window or selected gain region is too small.');
-        return;
+      canvas.width = 1200; canvas.height = 320;
+      // Black padding is never mistaken for the near-white status digits.
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (const [index, r] of [config.levelRegion ?? DEFAULT_LEVEL_REGION, config.region].entries()) {
+        const x = Math.round(r.x * video.videoWidth), y = Math.round(r.y * video.videoHeight);
+        const width = Math.min(video.videoWidth - x, Math.round(r.width * video.videoWidth));
+        const height = Math.min(video.videoHeight - y, Math.round(r.height * video.videoHeight));
+        if (width < 4 || height < 4) {
+          window.mscw.captureError('The game window or selected status field is too small.');
+          return;
+        }
+        const scale = Math.min(1, 1160 / width, 120 / height);
+        rawCanvas.width = Math.round(width * scale); rawCanvas.height = Math.round(height * scale);
+        rawCtx.imageSmoothingEnabled = false;
+        rawCtx.drawImage(video, x, y, width, height, 0, 0, rawCanvas.width, rawCanvas.height);
+        ctx.drawImage(rawCanvas, 20, index * 160 + 20);
       }
-      canvas.width = width * 3;
-      canvas.height = height * 3;
-      rawCanvas.width = width; rawCanvas.height = height;
-      rawCtx.drawImage(video, x, y, width, height, 0, 0, width, height);
-      const pixels = rawCtx.getImageData(0, 0, width, height);
-      isolateNotificationText(pixels.data);
-      rawCtx.putImageData(pixels, 0, 0);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(rawCanvas, 0, 0, canvas.width, canvas.height);
-      window.mscw.captureFrame(canvas.toDataURL('image/png'));
+      window.mscw.captureFrame(canvas.toDataURL('image/png'), video.videoWidth, video.videoHeight);
       last = now;
     }
     video.requestVideoFrameCallback(frame);

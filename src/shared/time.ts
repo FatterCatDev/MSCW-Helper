@@ -3,7 +3,7 @@ import type { BossEntry, RateSample } from './types.ts';
 export const HOUR = 3_600_000;
 
 export function retainRateWindow(samples: RateSample[], now: number): RateSample[] {
-  const firstInside = samples.findIndex(s => s.t >= now - 10 * 60_000);
+  const firstInside = samples.findIndex(s => s.t >= now - 11 * 60_000);
   return samples.slice(Math.max(0, (firstInside < 0 ? samples.length : firstInside) - 1));
 }
 
@@ -23,6 +23,18 @@ export function rollingPerMinute(samples: readonly RateSample[], now: number, wi
     }
   }
   return (last.value - value) * 60_000 / (now - start);
+}
+
+/** Reconstructs one-second rate points using only readings available at each timestamp. */
+export function expRateHistory(samples: readonly RateSample[], now: number): { t: number; value: number | null }[] {
+  const end = Math.floor(now / 1000) * 1000;
+  const points: { t: number; value: number | null }[] = [];
+  let count = 0;
+  for (let t = end - 600_000; t <= end; t += 1000) {
+    while (count < samples.length && samples[count]!.t <= t) count++;
+    points.push({ t, value: rollingPerMinute(samples.slice(0, count), t, 60_000) });
+  }
+  return points;
 }
 
 /** Units gained per hour between the first and last sample, or null if not enough data. */

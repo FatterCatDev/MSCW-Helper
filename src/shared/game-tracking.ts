@@ -3,6 +3,49 @@ import type { CaptureRegion, GameTrackingConfig } from './types.ts';
 export const MAX_CAPTURE_FPS = 30;
 export const CAPTURE_INTERVAL_MS = 1000 / MAX_CAPTURE_FPS;
 export const DEFAULT_GAIN_REGION: CaptureRegion = { x: 0.84, y: 0.68, width: 0.16, height: 0.13 };
+export const DEFAULT_EXP_REGION: CaptureRegion = { x: 0.54921875, y: 0.9569444444, width: 0.08046875, height: 0.0159722222 };
+export const DEFAULT_LEVEL_REGION: CaptureRegion = { x: 0.221875, y: 0.9652777778, width: 0.021484375, height: 0.0180555556 };
+
+export interface ExpReading { level: number; current: number; percent: number }
+
+export function parseExpStatus(text: string): ExpReading | null {
+  const levelMatch = /\bL[VY][.,:\s]*(\d{1,3})\b/i.exec(text);
+  const expMatch = /\bEXP\s*[:.]?\s*([\d,]+)\s*[\[(]\s*(\d{1,2}(?:\.\d{1,2})?)\s*%\s*[\])]/i.exec(text);
+  if (!levelMatch || !expMatch) return null;
+  const level = Number(levelMatch[1]);
+  const current = Number(expMatch[1]!.replaceAll(',', ''));
+  const percent = Number(expMatch[2]);
+  if (!Number.isSafeInteger(level) || level < 1 || level > 300 || !Number.isSafeInteger(current) ||
+      current < 0 || percent < 0 || percent >= 100 || (current === 0 && percent !== 0)) return null;
+  return { level, current, percent };
+}
+
+export function parseExpFields(levelText: string, expText: string): ExpReading | null {
+  const level = levelText.trim().replace(/\s+/g, '');
+  const exp = /^([\d,.]+)\[\s*(\d{1,2}\.\d{1,2})%\s*[\]1Il|]$/.exec(expText.replace(/\s+/g, ''));
+  if (!/^\d{1,3}$/.test(level) || !exp) return null;
+  const points = exp[1]!;
+  if (!/^(?:\d+|\d{1,3}(?:[,.]\d{3})+)$/.test(points)) return null;
+  return parseExpStatus(`LV ${level} EXP ${points.replaceAll('.', ',')} [${exp[2]}%]`);
+}
+
+export function estimateExpRequirement(reading: ExpReading, previous?: number): number | null {
+  if (previous && previous > reading.current &&
+      Math.abs(reading.current * 100 / previous - reading.percent) <= 0.011) return previous;
+  if (reading.percent <= 0 || reading.current <= 0) return null;
+  const required = Math.round(reading.current * 100 / reading.percent);
+  return Number.isSafeInteger(required) && required > reading.current ? required : null;
+}
+
+export interface ExpRequirementRange { min: number; max: number }
+
+export function expRequirementRange(reading: ExpReading, previous?: ExpRequirementRange): ExpRequirementRange | null {
+  if (reading.current === 0 && reading.percent === 0) return previous ?? null;
+  if (reading.current <= 0 || reading.percent <= 0.011) return null;
+  const min = Math.max(reading.current + 1, Math.ceil(reading.current * 100 / (reading.percent + 0.011)), previous?.min ?? 0);
+  const max = Math.min(Math.floor(reading.current * 100 / (reading.percent - 0.011)), previous?.max ?? Number.MAX_SAFE_INTEGER);
+  return Number.isSafeInteger(min) && Number.isSafeInteger(max) && min <= max ? { min, max } : null;
+}
 
 export function isolateNotificationText(pixels: Uint8ClampedArray): void {
   for (let i = 0; i < pixels.length; i += 4) {
@@ -97,6 +140,8 @@ export function isGameTrackingConfig(value: unknown): value is GameTrackingConfi
   if (!value || typeof value !== 'object') return false;
   const c = value as Partial<GameTrackingConfig>;
   return [c.sourceId, c.windowName, c.expWidgetId, c.mesoWidgetId, c.apiVersion].every(v => typeof v === 'string') &&
-    validRegion(c.region) && !!c.priceOverrides && typeof c.priceOverrides === 'object' &&
+    validRegion(c.region) && (c.levelRegion === undefined || validRegion(c.levelRegion)) &&
+    (c.captureMode === undefined || c.captureMode === 'status-bar') &&
+    !!c.priceOverrides && typeof c.priceOverrides === 'object' &&
     !Array.isArray(c.priceOverrides) && Object.values(c.priceOverrides).every(p => Number.isSafeInteger(p) && p >= 0);
 }

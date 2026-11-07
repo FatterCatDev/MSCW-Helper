@@ -7,6 +7,7 @@ import { HotkeyInput } from './HotkeyInput.tsx';
 import { WidgetConfigEditor } from './WidgetEditors.tsx';
 import { GameAssets } from './GameAssets.tsx';
 import { GameTrackingSettings } from './GameTracking.tsx';
+import { Initialization } from './Initialization.tsx';
 
 type Tab = 'widgets' | 'layouts' | 'settings' | 'about';
 
@@ -243,6 +244,7 @@ export function ControlApp(): ReactNode {
   }, [state, selected]);
 
   if (!state) return <div className="loading">Loading…</div>;
+  if (state.runtime.initializing) return <Initialization />;
   const s = state.settings;
 
   return (

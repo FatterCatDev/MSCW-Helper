@@ -33,6 +33,13 @@ body.control-body {
   color: var(--muted);
 }
 
+.initialization-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 200px;
+  margin: 12px auto;
+}
+
 .control {
   display: flex;
   flex-direction: column;

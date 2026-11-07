@@ -20,6 +20,7 @@ export const IPC = {
   startPotions: 'potions:start',
   stopPotions: 'potions:stop',
   startGameTracking: 'game-tracking:start',
+  initializeGame: 'game:initialize',
   stopGameTracking: 'game-tracking:stop',
   captureConfig: 'capture:config',
   captureFrame: 'capture:frame',
@@ -53,9 +54,10 @@ export interface MscwApi {
   startPotions(widgetId: string): Promise<void>;
   stopPotions(widgetId: string): Promise<void>;
   startGameTracking(): Promise<void>;
+  initializeGame(sourceId: string): Promise<void>;
   stopGameTracking(): Promise<void>;
   captureConfig(): Promise<GameTrackingConfig>;
-  captureFrame(image: string): void;
+  captureFrame(image: string, width?: number, height?: number): void;
   captureError(message: string): void;
   quit(): void;
 }

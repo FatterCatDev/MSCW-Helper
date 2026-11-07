@@ -38,6 +38,22 @@ test('uncertain numeric words from the video cannot inflate meso gains', () => {
   assert.ok(itemNameDistance('Tree Branch', 'Squishy Liquid') > 1);
 });
 
+test('readable gameplay lines remain usable when the background and item marker are noisy', () => {
+  const symbols = [{ text: '1', confidence: 99 }, { text: '3', confidence: 98 }];
+  assert.deepEqual(parseConfidentGainLine({
+    text: 'You have gained mesos (+13)', confidence: 91,
+    words: [{ text: '(+13)', confidence: 88, symbols }]
+  }), { kind: 'meso', amount: 13, key: 'meso:13' });
+  assert.deepEqual(parseConfidentGainLine({
+    text: 'Squishy Liguid #1 earned. (Etc)', confidence: 72,
+    words: [{ text: '#1', confidence: 28, symbols: [{ text: '#', confidence: 0 }, { text: '1', confidence: 99 }] }]
+  }), { kind: 'item', name: 'Squishy Liguid', quantity: 1, key: 'item:squishy liguid:1' });
+  assert.equal(parseConfidentGainLine({
+    text: 'You have gained mesos (+149)', confidence: 88,
+    words: [{ text: '(+149)', confidence: 73, symbols: [...symbols, { text: '9', confidence: 99 }] }]
+  }), null);
+});
+
 test('gain session combines meso pickups and item quantities without wallet sale double counting', () => {
   let s = defaultState();
   const exp = Object.values(s.widgets).find(w => w.type === 'exp')!;
