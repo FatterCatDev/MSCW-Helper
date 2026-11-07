@@ -1,0 +1,27 @@
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { IPC, type MscwApi } from '../shared/ipc.ts';
+import type { AppState } from '../shared/types.ts';
+
+const api: MscwApi = {
+  getState: () => ipcRenderer.invoke(IPC.getState),
+  onState: (cb) => {
+    const listener = (_e: IpcRendererEvent, state: AppState): void => cb(state);
+    ipcRenderer.on(IPC.state, listener);
+    return () => ipcRenderer.removeListener(IPC.state, listener);
+  },
+  dispatch: (action) => ipcRenderer.send(IPC.dispatch, action),
+  setEditMode: (on) => ipcRenderer.send(IPC.setEditMode, on),
+  setIgnoreMouse: (ignore) => ipcRenderer.send(IPC.setIgnoreMouse, ignore),
+  setFocusable: (focusable) => ipcRenderer.send(IPC.setFocusable, focusable),
+  openControl: (widgetId) => ipcRenderer.send(IPC.openControl, widgetId),
+  onFocusWidget: (cb) => {
+    const listener = (_e: IpcRendererEvent, id: string): void => cb(id);
+    ipcRenderer.on(IPC.focusWidget, listener);
+    return () => ipcRenderer.removeListener(IPC.focusWidget, listener);
+  },
+  pickImages: (widgetId) => ipcRenderer.invoke(IPC.pickImages, widgetId),
+  removeImage: (widgetId, name) => ipcRenderer.invoke(IPC.removeImage, widgetId, name),
+  quit: () => ipcRenderer.send(IPC.quit)
+};
+
+contextBridge.exposeInMainWorld('mscw', api);

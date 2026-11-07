@@ -1,0 +1,141 @@
+:root {
+  --accent: #f58c1f;
+  --accent-2: #ffb35c;
+  --good: #7ed67e;
+  --bad: #ff6b6b;
+  --warn: #ffd54f;
+  --text: #eef0f4;
+  --muted: #9aa3b2;
+  --panel: #1b1e26;
+  --panel-2: #232733;
+  --border: #343a48;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: var(--accent);
+  color: #1a1206;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:hover {
+  background: var(--accent-2);
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-weight: 500;
+}
+
+button.ghost:hover {
+  border-color: var(--accent);
+}
+
+button.danger {
+  background: #b33a3a;
+  color: white;
+}
+
+button.icon {
+  background: transparent;
+  color: var(--muted);
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+button.icon:hover {
+  color: var(--text);
+}
+
+button.small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+input,
+select,
+textarea {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  outline: none;
+  min-width: 0;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+input.error {
+  border-color: var(--bad);
+}
+
+select option,
+select optgroup {
+  background: var(--panel);
+}
+
+kbd {
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  padding: 0 4px;
+  margin-left: 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.75;
+  font-weight: 400;
+}
+
+.mono {
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.dim {
+  opacity: 0.55;
+}
+
+.good {
+  color: var(--good);
+}
+
+.bad {
+  color: var(--bad);
+}
