@@ -4,6 +4,18 @@ A customizable, always-on-top game overlay for **MapleStory Classic World**.
 
 Widgets float above the game in a transparent window. Empty space passes clicks straight through to the game, and you can arrange widgets into multiple saved **layouts**.
 
+## Alpha testing on Windows
+
+The first alpha is version `0.1.0-alpha.1`. After running `npm run dist`, open
+`release\MSCW Helper 0.1.0-alpha.1.exe` for the portable version, or run
+`release\MSCW Helper Setup 0.1.0-alpha.1.exe` to install it. The portable app
+still stores its settings and imported assets in the Windows user data directory.
+The executables are unsigned, so Windows may display a publisher warning.
+Build output in `release\` is ignored by Git and must be distributed separately.
+
+This alpha uses manual entry; importing UI assets does not yet enable automatic
+screen capture or OCR. Real-game overlay behavior still needs testing.
+
 ## Widgets
 
 | Widget | What it does |
