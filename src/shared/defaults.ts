@@ -98,6 +98,8 @@ export const DEFAULT_HOTKEYS: Settings['hotkeys'] = {
   nextProfile: 'Ctrl+Shift+F5'
 };
 
+export const DEFAULT_GAME_DATA_PATH = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\MapleStory\\MSCW\\Data';
+
 export function defaultSettings(): Settings {
   return {
     hotkeys: { ...DEFAULT_HOTKEYS },
@@ -105,7 +107,8 @@ export function defaultSettings(): Settings {
     clickThrough: false,
     overlayVisible: true,
     soundEnabled: true,
-    launchAtLogin: false
+    launchAtLogin: false,
+    gameDataPath: DEFAULT_GAME_DATA_PATH
   };
 }
 
@@ -224,7 +227,8 @@ export function normalizeState(raw: unknown): PersistedState {
       clickThrough: typeof s.clickThrough === 'boolean' ? s.clickThrough : defaults.clickThrough,
       overlayVisible: typeof s.overlayVisible === 'boolean' ? s.overlayVisible : defaults.overlayVisible,
       soundEnabled: typeof s.soundEnabled === 'boolean' ? s.soundEnabled : defaults.soundEnabled,
-      launchAtLogin: typeof s.launchAtLogin === 'boolean' ? s.launchAtLogin : defaults.launchAtLogin
+      launchAtLogin: typeof s.launchAtLogin === 'boolean' ? s.launchAtLogin : defaults.launchAtLogin,
+      gameDataPath: typeof s.gameDataPath === 'string' && s.gameDataPath.trim() ? s.gameDataPath.trim() : defaults.gameDataPath
     }
   };
 }

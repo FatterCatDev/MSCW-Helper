@@ -7,6 +7,7 @@ import { isAction, reducer, type Action } from '../shared/reducer.ts';
 import type { AppState, HotkeyAction, PersistedState, RuntimeState } from '../shared/types.ts';
 import { createAppIcon } from './icon.ts';
 import { Store } from './store.ts';
+import { getGameAssets, importGameAssets } from './game-assets.ts';
 
 const IMAGE_NAME_RE = /^[0-9a-f-]{36}\.(png|jpe?g|gif|webp|bmp)$/i;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -31,6 +32,7 @@ let tray: Tray | null = null;
 let quitting = false;
 let rendererWantsIgnore = true;
 let hotkeySignature = '';
+let importingGameAssets = false;
 const runtime: RuntimeState = { editMode: false, hotkeyErrors: {}, displays: [] };
 
 function fullState(): AppState {
@@ -387,6 +389,43 @@ function fromOverlay(e: IpcMainEvent): boolean {
 }
 
 function registerIpc(): void {
+  const assetsRoot = join(app.getPath('userData'), 'game-assets');
+  const requireControl = (e: IpcMainInvokeEvent): void => {
+    if (!control || BrowserWindow.fromWebContents(e.sender) !== control) throw new Error('Game asset access is only available from the control panel.');
+  };
+  ipcMain.handle(IPC.pickGameData, async (e) => {
+    requireControl(e);
+    const result = await dialog.showOpenDialog(control!, {
+      title: 'Choose MapleStory Classic World Data folder',
+      defaultPath: store.get().settings.gameDataPath,
+      properties: ['openDirectory']
+    });
+    if (result.canceled) return null;
+    const path = result.filePaths[0];
+    if (!path) throw new Error('No game Data folder was selected.');
+    dispatch({ type: 'settings/set', patch: { gameDataPath: path } });
+    return path;
+  });
+  ipcMain.handle(IPC.getGameAssets, async (e) => {
+    requireControl(e);
+    return getGameAssets(assetsRoot);
+  });
+  ipcMain.handle(IPC.importGameAssets, async (e, path: unknown) => {
+    requireControl(e);
+    if (typeof path !== 'string') throw new Error('The game Data path must be a string.');
+    if (importingGameAssets) throw new Error('A UI asset import is already running.');
+    importingGameAssets = true;
+    try {
+      const result = await importGameAssets(path, assetsRoot);
+      dispatch({ type: 'settings/set', patch: { gameDataPath: result.sourcePath } });
+      return result;
+    } catch (error) {
+      console.error('[game-assets] import failed', error);
+      throw error;
+    } finally {
+      importingGameAssets = false;
+    }
+  });
   ipcMain.handle(IPC.getState, (e) => (fromOurWindow(e) ? fullState() : null));
   ipcMain.on(IPC.dispatch, (e, action: unknown) => {
     if (fromOurWindow(e) && isAction(action)) dispatch(action);

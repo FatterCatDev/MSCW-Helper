@@ -21,6 +21,9 @@ const api: MscwApi = {
   },
   pickImages: (widgetId) => ipcRenderer.invoke(IPC.pickImages, widgetId),
   removeImage: (widgetId, name) => ipcRenderer.invoke(IPC.removeImage, widgetId, name),
+  pickGameData: () => ipcRenderer.invoke(IPC.pickGameData),
+  importGameAssets: (path) => ipcRenderer.invoke(IPC.importGameAssets, path),
+  getGameAssets: () => ipcRenderer.invoke(IPC.getGameAssets),
   quit: () => ipcRenderer.send(IPC.quit)
 };
 

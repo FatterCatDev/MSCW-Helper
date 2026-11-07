@@ -35,6 +35,31 @@ All hotkeys can be changed in **Settings**. Buff timers and kill counters can ha
 - Clicking buttons on widgets doesn't take keyboard focus from the game. Typing into a widget's text box does, so click the game again when you're done.
 - On a multi-monitor setup, pick the game's monitor under **Settings → Display**.
 
+### Import game UI assets
+
+Under **Settings → Game UI assets**, choose the game's **Data** folder using
+**Browse...** or enter its path, then click **Import UI assets**. The default is:
+
+```text
+C:\Program Files (x86)\Steam\steamapps\common\MapleStory\MSCW\Data
+```
+
+The folder must contain a non-empty `UI` directory. MSCW Helper copies its complete
+contents (including nested WZ archives, INI files and fonts) into a private snapshot
+under `%APPDATA%\mscw-helper\game-assets`. It does not change the game installation,
+copy other game-data folders, or upload assets. Use only assets you are authorized
+to use; they are not bundled with the app or committed to this repository.
+
+The app remembers your selected path and shows the latest import's file count,
+size, date, source and local destination. Each snapshot includes a file manifest.
+Re-import after game updates; a successful import replaces the previous snapshot,
+while a failed import leaves the last successful one untouched. Missing folders, access errors and
+empty UI directories are reported in Settings.
+
+**This imports the original files, not decoded images.** The current game's UI uses
+`.wz` archives; extracting recognition templates and wiring screen capture/OCR are
+separate future steps. The game does not need to be running to import.
+
 ## Development
 
 Requirements: Node.js 22.12+ (installed: Node 24 LTS).
@@ -76,5 +101,5 @@ src/
 
 ### Roadmap
 
-- **Phase 2 – OCR:** capture a user-selected screen region and read EXP and mesos automatically (e.g. tesseract.js). It reads pixels only, with no memory reading or injection, so it's account-safe.
+- **Phase 2 – OCR:** extract UI templates from the locally imported WZ assets, capture a user-selected screen region and read EXP and mesos automatically (e.g. tesseract.js). No memory reading or injection is planned; compatibility with the game's rules still needs to be verified.
 - Import/export of layouts.

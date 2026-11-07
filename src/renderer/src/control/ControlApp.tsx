@@ -5,6 +5,7 @@ import { useAppState, type Dispatch } from '../common/state.ts';
 import { Field, NumberField, Slider, TextField, Toggle } from './fields.tsx';
 import { HotkeyInput } from './HotkeyInput.tsx';
 import { WidgetConfigEditor } from './WidgetEditors.tsx';
+import { GameAssets } from './GameAssets.tsx';
 
 type Tab = 'widgets' | 'layouts' | 'settings' | 'about';
 
@@ -189,6 +190,7 @@ function SettingsTab({ state, dispatch }: { state: AppState; dispatch: Dispatch 
         label="Click-through: widgets ignore the mouse entirely (use hotkeys to interact)"
       />
       <Toggle checked={s.soundEnabled} onChange={(soundEnabled) => dispatch({ type: 'settings/set', patch: { soundEnabled } })} label="Sound alerts for timers" />
+      <GameAssets path={s.gameDataPath} dispatch={dispatch} />
       <h3>App</h3>
       <Toggle checked={s.launchAtLogin} onChange={(launchAtLogin) => dispatch({ type: 'settings/set', patch: { launchAtLogin } })} label="Launch at Windows sign-in (installed app only)" />
       <div className="row-left">

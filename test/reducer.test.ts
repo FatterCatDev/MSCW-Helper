@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defaultState, normalizeState } from '../src/shared/defaults.ts';
+import { DEFAULT_GAME_DATA_PATH, defaultState, normalizeState } from '../src/shared/defaults.ts';
 import { isAction, reducer, type Action } from '../src/shared/reducer.ts';
 import type { PersistedState, WidgetDef } from '../src/shared/types.ts';
 
@@ -160,4 +160,15 @@ test('normalizeState repairs garbage and partial files', () => {
   assert.equal(fixed.activeProfileId, fixed.profiles[0]!.id);
   assert.equal(fixed.settings.hotkeys.toggleEdit, 'Ctrl+Shift+F2');
   assert.deepEqual(fixed.widgetOrder, s.widgetOrder);
+});
+
+test('game Data path defaults, persists and rejects blank or wrong-type settings', () => {
+  const s = defaultState();
+  assert.equal(s.settings.gameDataPath, DEFAULT_GAME_DATA_PATH);
+  const next = run(s, { type: 'settings/set', patch: { gameDataPath: '  D:\\Games\\MSCW\\Data  ' } });
+  assert.equal(next.settings.gameDataPath, 'D:\\Games\\MSCW\\Data');
+  assert.equal(normalizeState(next).settings.gameDataPath, next.settings.gameDataPath);
+  assert.equal(run(next, { type: 'settings/set', patch: { gameDataPath: ' ' } }).settings.gameDataPath, next.settings.gameDataPath);
+  assert.equal(normalizeState({ ...s, settings: {} }).settings.gameDataPath, DEFAULT_GAME_DATA_PATH);
+  assert.equal(normalizeState({ ...s, settings: { gameDataPath: 42 } }).settings.gameDataPath, DEFAULT_GAME_DATA_PATH);
 });

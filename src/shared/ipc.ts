@@ -1,5 +1,5 @@
 import type { Action } from './reducer.ts';
-import type { AppState } from './types.ts';
+import type { AppState, GameAssetImport } from './types.ts';
 
 export const IPC = {
   getState: 'state:get',
@@ -12,6 +12,9 @@ export const IPC = {
   focusWidget: 'control:focus-widget',
   pickImages: 'image:pick',
   removeImage: 'image:remove',
+  pickGameData: 'game-data:pick',
+  importGameAssets: 'game-assets:import',
+  getGameAssets: 'game-assets:get',
   quit: 'app:quit'
 } as const;
 
@@ -33,5 +36,8 @@ export interface MscwApi {
   onFocusWidget(cb: (widgetId: string) => void): () => void;
   pickImages(widgetId: string): Promise<void>;
   removeImage(widgetId: string, name: string): Promise<void>;
+  pickGameData(): Promise<string | null>;
+  importGameAssets(path: string): Promise<GameAssetImport>;
+  getGameAssets(): Promise<GameAssetImport | null>;
   quit(): void;
 }

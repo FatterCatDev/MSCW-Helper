@@ -96,6 +96,15 @@ export interface Settings {
   overlayVisible: boolean;
   soundEnabled: boolean;
   launchAtLogin: boolean;
+  gameDataPath: string;
+}
+
+export interface GameAssetImport {
+  sourcePath: string;
+  importedAt: number;
+  fileCount: number;
+  totalBytes: number;
+  directory: string;
 }
 
 export interface PersistedState {

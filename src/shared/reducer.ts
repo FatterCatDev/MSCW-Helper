@@ -43,7 +43,7 @@ export function isAction(v: unknown): v is Action {
 /** An EXP % drop larger than this between samples is treated as a level up. */
 export const LEVEL_UP_DROP = 5;
 
-const SETTINGS_KEYS = ['displayId', 'clickThrough', 'overlayVisible', 'soundEnabled', 'launchAtLogin'] as const;
+const SETTINGS_KEYS = ['displayId', 'clickThrough', 'overlayVisible', 'soundEnabled', 'launchAtLogin', 'gameDataPath'] as const;
 
 function finite(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n);
@@ -148,6 +148,8 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
         const v = action.patch[key];
         if (key === 'displayId') {
           if (v === null || finite(v)) settings.displayId = v as number | null;
+        } else if (key === 'gameDataPath') {
+          if (typeof v === 'string' && v.trim()) settings.gameDataPath = v.trim();
         } else if (typeof v === 'boolean') {
           settings[key] = v;
         }
