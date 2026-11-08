@@ -95,13 +95,16 @@ function broadcast(): void {
 }
 
 function dispatch(action: Action): void {
-  const training = action.type === 'training/reset' ? store.get().widgets[action.id] : undefined;
-  if (training?.type === 'training' && runtime.gameTracking.running &&
-      store.get().settings.gameTracking.expWidgetId === training.config.expId) gameTracking.resetBaseline();
-  if (action.type === 'rate/reset' && runtime.gameTracking.running &&
-      store.get().settings.gameTracking.expWidgetId === action.id) gameTracking.stop();
   const prev = store.get();
+  const training = action.type === 'training/reset' ? prev.widgets[action.id] : undefined;
+  const resetActiveExp = training?.type === 'training' && runtime.gameTracking.running &&
+    prev.settings.gameTracking.expWidgetId === training.config.expId;
+  if (action.type === 'rate/reset' && runtime.gameTracking.running &&
+      prev.settings.gameTracking.expWidgetId === action.id) gameTracking.stop();
   let next = reducer(prev, action);
+  if (resetActiveExp && training?.type === 'training') {
+    next = reducer(next, { type: 'exp/start', id: training.config.expId });
+  }
   if (action.type === 'settings/set' && action.patch.gameTracking) {
     const config = next.settings.gameTracking;
     const meso = next.widgets[config.mesoWidgetId];
@@ -113,6 +116,7 @@ function dispatch(action: Action): void {
   }
   if (next === prev) return;
   store.set(next);
+  if (resetActiveExp) gameTracking.resetBaseline();
   applySideEffects(prev, next, training?.type === 'training' ? training.config.mesoId :
     action.type === 'rate/reset' || action.type === 'potion/reset' ? action.id : undefined);
   broadcast();

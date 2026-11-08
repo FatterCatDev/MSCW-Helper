@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defaultState, normalizeState } from '../src/shared/defaults.ts';
+import { defaultData, defaultState, normalizeState } from '../src/shared/defaults.ts';
 import { reducer } from '../src/shared/reducer.ts';
 import { usedRecoveryItems } from '../src/shared/recovery.ts';
 
@@ -44,7 +44,11 @@ test('training reset clears both EXP and potion totals but preserves item select
   assert.ok(training?.type === 'training');
   state = reducer(state, { type: 'exp/sample', id: training.config.expId, value: 100, required: 1000, level: 1, at: 1 });
   state = reducer(state, { type: 'exp/sample', id: training.config.expId, value: 200, required: 1000, level: 1, at: 2 });
-  state = reducer(state, { type: 'widget/config', id: training.config.mesoId, config: { selectedPotions: { hp: null, mp: 2010005 } } });
+  state = reducer(state, { type: 'rate/sample', id: training.config.mesoId, value: 500, at: 1 });
+  state = reducer(state, { type: 'rate/sample', id: training.config.mesoId, value: 700, at: 2 });
+  const prices = [{ id: 'lemon-price', itemId: 2010005, name: 'Lemon', unitCost: 150 }];
+  state = reducer(state, { type: 'widget/config', id: training.config.mesoId,
+    config: { goal: 1000, potions: prices, selectedPotions: { hp: null, mp: 2010005 } } });
   state = reducer(state, { type: 'recovery/event', id: training.config.mesoId, event: {
     id: 'one', at: 3, hp: 0, mp: 150, candidates: [2010005], itemId: 2010005, cost: 150, reason: 'matched'
   } });
@@ -52,12 +56,15 @@ test('training reset clears both EXP and potion totals but preserves item select
   assert.ok(beforeExp?.type === 'exp' && beforeMeso?.type === 'meso');
   assert.equal(beforeExp.data.gained, 100);
   assert.equal(beforeMeso.data.potionCosts, 150);
-  assert.deepEqual(beforeMeso.data.potionUses, { 'recovery-2010005': 1 });
+  assert.deepEqual(beforeMeso.data.potionUses, { 'lemon-price': 1 });
+  assert.equal(beforeMeso.data.samples.length, 2);
   state = reducer(state, { type: 'training/reset', id: training.id });
   const exp = state.widgets[training.config.expId], meso = state.widgets[training.config.mesoId];
   assert.ok(exp?.type === 'exp' && meso?.type === 'meso');
-  assert.equal(exp.data.gained, 0); assert.equal(exp.data.current, null);
-  assert.equal(meso.data.potionCosts, 0); assert.deepEqual(meso.data.potionUses, {});
+  assert.deepEqual(exp.data, defaultData('exp'));
+  assert.deepEqual(meso.data, defaultData('meso'));
+  assert.equal(meso.config.goal, 1000);
+  assert.deepEqual(meso.config.potions, prices);
   assert.deepEqual(meso.config.selectedPotions, { hp: null, mp: 2010005 });
 });
 

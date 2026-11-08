@@ -38,7 +38,7 @@ export function ExpWidget({ w, dispatch, embedded = false }: WidgetProps<'exp'> 
 
   return (
     <div className="widget-body">
-      <div className="big">{w.data.source === 'notifications' ? formatNumber(gained) : current === null ? '—' : formatNumber(current)} <span className="hint">EXP</span></div>
+      <div className="big">{w.data.source === 'notifications' ? formatNumber(gained) : current === null ? '—' : formatNumber(current)} <span className="hint">{embedded && w.data.source !== 'notifications' ? 'Current EXP' : 'EXP'}</span></div>
       <div className="stats">
         <Stat label="EXP/min" value={rate === null ? '—' : formatNumber(rate)} />
         <Stat label="10-min avg/min" value={average === null ? '—' : formatNumber(average)} />

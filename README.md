@@ -213,7 +213,9 @@ counts**. Old item IDs, manual prices and past expenses are preserved; old hotke
 and count-region metadata is discarded. The Training Tracker displays only items
 with recorded uses, including items selected earlier in the session. **Reset tracker**
 clears EXP, wallet and recovery totals together, preserving selected items and
-prices, and establishes new capture baselines. **Reset potion costs and recovery
+prices, and establishes new capture baselines. The current EXP reading is the
+character's actual EXP and reappears after the next captured frame; session EXP,
+rates and graph start fresh. **Reset potion costs and recovery
 events** in settings leaves EXP and wallet samples alone.
 Existing EXP and meso widgets are combined into a Training Tracker on upgrade;
 their saved data and selections are retained.
