@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { defaultState, normalizeState } from '../src/shared/defaults.ts';
 import { reducer } from '../src/shared/reducer.ts';
-import { reconcileTrainingTime, trainingElapsed } from '../src/shared/training-time.ts';
+import { isTrainingMap, reconcileTrainingTime, trainingElapsed } from '../src/shared/training-time.ts';
+import type { MapStatus } from '../src/shared/types.ts';
 
-test('training time pauses in safe or unverified maps and resumes without counting the gap', () => {
+test('training time pauses and resumes without counting the gap', () => {
   let state = defaultState();
   const training = Object.values(state.widgets).find(w => w.type === 'training');
   assert.ok(training?.type === 'training');
@@ -22,6 +23,36 @@ test('training time pauses in safe or unverified maps and resumes without counti
   state = reconcileTrainingTime(state, null, 11000);
   assert.deepEqual(data(), { elapsedMs: 5000, runningSince: null });
   assert.equal(reconcileTrainingTime(state, null, 12000), state);
+});
+
+test('unknown safety counts as training while capture runs, including after a reset', () => {
+  let state = defaultState();
+  const training = Object.values(state.widgets).find(w => w.type === 'training');
+  assert.ok(training?.type === 'training');
+  const map = (status: MapStatus['state']): MapStatus => ({ state: status, message: '' });
+  const sync = (running: boolean, status: MapStatus['state'], at: number) => {
+    state = reconcileTrainingTime(state, isTrainingMap(running, map(status)) ? training.config.expId : null, at);
+  };
+  const elapsed = (at: number) => {
+    const widget = state.widgets[training.id];
+    assert.ok(widget?.type === 'training');
+    return trainingElapsed(widget.data, at);
+  };
+  sync(true, 'unknown', 1000);
+  assert.equal(elapsed(4000), 3000);
+  sync(true, 'safe', 4000);
+  assert.equal(elapsed(6000), 3000);
+  sync(true, 'unknown', 6000);
+  state = reducer(state, { type: 'training/reset', id: training.id });
+  sync(true, 'unknown', 7000);
+  assert.equal(elapsed(9000), 2000);
+  sync(false, 'unknown', 9000);
+  assert.equal(elapsed(11000), 2000);
+  for (const status of ['searching', 'missing', 'reading', 'safe'] as const) {
+    assert.equal(isTrainingMap(true, map(status)), false, status);
+  }
+  assert.equal(isTrainingMap(true, map('unsafe')), true);
+  assert.equal(isTrainingMap(false, map('unsafe')), false);
 });
 
 test('reset and new capture clear training time without changing other trackers or the session timer', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Rnd } from 'react-rnd';
 import { WIDGET_LABELS } from '../../../shared/defaults.ts';
 import { bossNextAt, dailyKey, nextScheduled } from '../../../shared/time.ts';
@@ -8,6 +8,7 @@ import { WidgetContent } from '../widgets/index.tsx';
 import { DebugWidget } from './DebugWidget.tsx';
 import { formatDuration, formatNumber } from '../../../shared/time.ts';
 import { trainingElapsed } from '../../../shared/training-time.ts';
+import { NOTICE_DELAY_MS, NOTICE_FADE_MS, unknownNoticeKey, updateUnknownNotice, type UnknownNotice } from './notice-timing.ts';
 
 const INTERACTIVE = '.widget-rnd, .debug-rnd, [data-interactive]';
 const EDITABLE = 'input:not([type=checkbox]):not([type=range]):not([type=button]), textarea, select';
@@ -214,9 +215,15 @@ function EditToolbar({ state, dispatch }: { state: AppState; dispatch: Dispatch 
 export function OverlayApp(): ReactNode {
   const [state, dispatch] = useAppState();
   const now = useNow(250);
+  const [unknownNotice, setUnknownNotice] = useState<UnknownNotice | null>(null);
   useMousePassthrough();
   useFocusableInputs();
   useAlerts(state, dispatch, now);
+  const mapStatus = state?.runtime.map;
+  const running = state?.runtime.gameTracking.running ?? false;
+  useEffect(() => {
+    if (mapStatus) setUnknownNotice(previous => updateUnknownNotice(previous, mapStatus, running, Date.now()));
+  }, [mapStatus?.state, mapStatus?.message, mapStatus?.name, mapStatus?.street, running]);
 
   if (!state) return null;
   const edit = state.runtime.editMode;
@@ -231,6 +238,11 @@ export function OverlayApp(): ReactNode {
   const first = meso?.type === 'meso' ? meso.data.samples[0] : undefined;
   const last = meso?.type === 'meso' ? meso.data.samples.at(-1) : undefined;
   const mesoDelta = first && last ? last.value - first.value : null;
+  const noticeAge = map.state === 'unknown' && unknownNotice?.key === unknownNoticeKey(map, running)
+    ? Math.max(0, now - unknownNotice.since) : 0;
+  const showUnknown = map.state === 'unknown' && noticeAge < NOTICE_DELAY_MS + NOTICE_FADE_MS;
+  const faded = noticeAge >= NOTICE_DELAY_MS;
+  const showInventory = state.runtime.inventory.state !== 'open';
 
   return (
     <div className={`overlay-root ${edit ? 'edit' : ''}`}>
@@ -252,10 +264,10 @@ export function OverlayApp(): ReactNode {
           {state.runtime.inventory.state !== 'open' && <div className="hint">{state.runtime.inventory.message}</div>}
         </div>
       </Rnd>}
-      {!onlyPrompt && !onlySummary && (map.state === 'unknown' || state.runtime.inventory.state !== 'open') &&
-        <div className="map-notice" role="status">
-          {map.state === 'unknown' && <div>Map safety unknown: {map.message}</div>}
-          {state.runtime.inventory.state !== 'open' && <div>{state.runtime.inventory.message}</div>}
+      {!onlyPrompt && !onlySummary && (showUnknown || showInventory) &&
+        <div className={`map-notice ${showUnknown && !showInventory && faded ? 'notice-faded' : ''}`} role="status">
+          {showUnknown && <div className={faded ? 'notice-faded' : 'notice-fade'}>Map safety unknown{running ? ' (counting as training)' : ''}: {map.message}</div>}
+          {showInventory && <div>{state.runtime.inventory.message}</div>}
         </div>}
       {!onlyPrompt && !onlySummary && state.settings.gameTracking.sourceId && <div className="capture-fps">
         Capture: {state.runtime.gameTracking.fps.toFixed(1)} / 30 FPS

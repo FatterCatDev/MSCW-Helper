@@ -44,8 +44,23 @@ test('finds compact header at different positions and scales without treating or
   assert.equal(findCompactMinimap(new Uint8ClampedArray(10), 50, 50), null);
 });
 
+test('finds compact headers when scaled control borders shift by a few pixels', () => {
+  const width = 900, height = 400, pixels = new Uint8ClampedArray(width * height * 4);
+  const paint = (x: number, y: number, w: number, h: number, color: number[]) => {
+    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++)
+      pixels.set(color, (yy * width + xx) * 4);
+  };
+  const scale = 68 / 36, x = 2, top = 6, start = 538, y = 12;
+  paint(x, top, 610, 30, [225, 225, 225, 255]);
+  paint(Math.round(start - 30 * scale) + 3, y, 2, 15, [30, 30, 30, 255]);
+  paint(start, y, 68, 4, [210, 120, 25, 255]);
+  assert.ok(findCompactMinimap(pixels, width, height));
+  paint(Math.round(start - 30 * scale) + 3, y, 2, 15, [225, 225, 225, 255]);
+  assert.equal(findCompactMinimap(pixels, width, height), null);
+});
+
 test('only an explicit shop or store name in the compact title is safe', () => {
-  for (const text of ['Victoria Road Ellinla Department Store', 'Victoria Road Elllinla Weapon Store',
+  for (const text of ['Victoria Road Ellinla Department Store', 'Victoria Road ; Ellinia Department Store', 'Victoria Road Elllinla Weapon Store',
     'Victoria Road : Ellinia Potion Shop']) assert.equal(isShopHeader(text), true, text);
   for (const text of ['', 'mini map', 'Victoria Road : Ellinia', 'Shop', 'Victoria Road Store Entrance',
     'Victoria Road Storehouse', 'Victoria Road Store CI', 'Victoria Road Department Stor'])

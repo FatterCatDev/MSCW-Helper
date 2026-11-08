@@ -19,7 +19,7 @@ import { usedRecoveryItems } from '../shared/recovery.ts';
 import { NPC_RECOVERY_ITEMS } from '../shared/npc-recovery-prices.ts';
 import { resetSessionPotions, resetSessionTimers } from '../shared/session-lifecycle.ts';
 import { MapTracking } from './map-tracking.ts';
-import { reconcileTrainingTime } from '../shared/training-time.ts';
+import { isTrainingMap, reconcileTrainingTime } from '../shared/training-time.ts';
 import { clearWallets, InventoryTracking, walletTick } from '../shared/inventory-tracking.ts';
 import type { InventoryReading } from '../shared/inventory.ts';
 
@@ -119,7 +119,7 @@ function dispatch(action: Action): void {
     next = reducer(next, { type: 'exp/start', id: training.config.expId });
   }
   if (action.type === 'training/reset') next = reconcileTrainingTime(next,
-    runtime.gameTracking.running && runtime.map.state === 'unsafe' ? next.settings.gameTracking.expWidgetId : null, Date.now());
+    isTrainingMap(runtime.gameTracking.running, runtime.map) ? next.settings.gameTracking.expWidgetId : null, Date.now());
   if (action.type === 'settings/set' && action.patch.gameTracking) {
     const config = next.settings.gameTracking;
     const meso = next.widgets[config.mesoWidgetId];
@@ -670,7 +670,7 @@ function start(): void {
   }, 1000);
   const syncTrainingTime = (): void => {
     const state = store.get();
-    const next = reconcileTrainingTime(state, runtime.gameTracking.running && runtime.map.state === 'unsafe'
+    const next = reconcileTrainingTime(state, isTrainingMap(runtime.gameTracking.running, runtime.map)
       ? state.settings.gameTracking.expWidgetId : null, Date.now());
     if (next !== state) store.set(next);
   };

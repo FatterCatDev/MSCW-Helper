@@ -1,4 +1,8 @@
-import type { PersistedState, WidgetDataMap } from './types.ts';
+import type { MapStatus, PersistedState, WidgetDataMap } from './types.ts';
+
+export function isTrainingMap(running: boolean, map: MapStatus): boolean {
+  return running && (map.state === 'unsafe' || map.state === 'unknown');
+}
 
 export function trainingElapsed(data: WidgetDataMap['training'], now: number): number {
   return data.elapsedMs + (data.runningSince === null ? 0 : Math.max(0, now - data.runningSince));

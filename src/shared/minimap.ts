@@ -28,12 +28,17 @@ export function findCompactMinimap(pixels: Uint8ClampedArray, width: number, hei
             if (titleWidth >= 80 && titleWidth <= 1200 && top + titleHeight <= height &&
                 start - left >= 100 * scale) {
               const controlX = Math.round(start - 30 * scale);
-              let dark = 0;
-              for (let dy = 0; dy < Math.round(10 * scale); dy++) {
-                const i = ((y + dy) * width + controlX) * 4;
-                if (pixels[i]! < 110 && pixels[i + 1]! < 110 && pixels[i + 2]! < 110) dark++;
+              let controlBorder = false;
+              const tolerance = Math.ceil(3 * scale);
+              for (let cx = Math.max(0, controlX - tolerance); cx <= Math.min(width - 1, controlX + tolerance); cx++) {
+                let dark = 0;
+                for (let dy = 0; dy < Math.round(10 * scale) && y + dy < height; dy++) {
+                  const i = ((y + dy) * width + cx) * 4;
+                  if (pixels[i]! < 110 && pixels[i + 1]! < 110 && pixels[i + 2]! < 110) dark++;
+                }
+                if (dark >= 4 * scale) { controlBorder = true; break; }
               }
-              if (dark >= 4 * scale) return { x: titleX, y: top, width: titleWidth, height: titleHeight };
+              if (controlBorder) return { x: titleX, y: top, width: titleWidth, height: titleHeight };
             }
           }
         }
@@ -46,7 +51,7 @@ export function findCompactMinimap(pixels: Uint8ClampedArray, width: number, hei
 
 /** A compact header alone is not proof of safety; require an explicit shop name. */
 export function isShopHeader(text: string): boolean {
-  return /^[a-z][a-z0-9 .':-]{3,110}\b(?:shop|store)\s*$/i.test(text.trim().replace(/\s+/g, ' '));
+  return /^[a-z][a-z0-9 .':;-]{3,110}\b(?:shop|store)\s*$/i.test(text.trim().replace(/\s+/g, ' '));
 }
 
 /** Locate the blue name panel between the minimap header and its map image. */

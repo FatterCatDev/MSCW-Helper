@@ -23,6 +23,8 @@ body.overlay-body,
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.notice-fade, .notice-faded { transition: opacity 400ms ease; }
+.notice-faded { opacity: 0; }
 .safe-summary strong { display: block; color: var(--good); font-size: 15px; }
 .safe-summary-rnd .safe-summary { position: static; transform: none; width: 100%; max-width: none; }
 .safe-summary-rnd.editing .safe-summary { border: 1px dashed var(--accent); cursor: move; }

@@ -49,8 +49,10 @@ region and map name locally. If the name panel cannot be found, it shows only
 an instruction to click the minimap **+** button. When a town with no listed
 monsters is identified, the overlay shows a safe-area summary and the Session
 Timer instead of the other widgets; other maps show the normal widgets. Unreadable names, ambiguous
-results and API failures show an unknown-safety warning instead of assuming
-the map is safe. When capture is stopped, normal widgets remain available.
+results and API failures show an unknown-safety warning and count as training
+while capture is active. The warning fades after three seconds if unchanged;
+inventory and minimap instructions remain visible. When capture is stopped,
+normal widgets remain available.
 Shop interiors with a compact minimap header are treated as safe when the
 header explicitly identifies a shop or store; other compact or unreadable
 headers still prompt the player to expand the minimap.
@@ -63,8 +65,8 @@ guarantee that the map is safe in MSCW. Exact map and region names are required;
 conflicting matching map records remain unknown. The panel detector is tuned to
 the supplied minimap appearance and may not recognize other UI scales or themes.
 The summary shows the active Training Tracker's accumulated training time.
-Training time runs only while capture is active and the map is identified as
-unsafe; it pauses in safe areas and while map safety is unknown or being read.
+Training time runs while capture is active and the map is unsafe or its safety
+is unknown; it pauses in safe areas and while the minimap is missing or being read.
 Resetting the Training Tracker resets this time; the independent Session Timer
 continues according to its own controls. The summary also shows session EXP and
 the wallet change since the first confirmed inventory reading.
