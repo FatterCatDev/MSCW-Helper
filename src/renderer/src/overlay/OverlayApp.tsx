@@ -115,7 +115,7 @@ function useAlerts(state: AppState | null, dispatch: Dispatch, now: number): voi
   }, [now, state, dispatch]);
 }
 
-function WidgetFrame(props: { w: WidgetDef; p: Placement; z: number; edit: boolean; dispatch: Dispatch; now: number; potionStatus: PotionStatus | undefined }): ReactNode {
+function WidgetFrame(props: { w: WidgetDef; p: Placement; z: number; edit: boolean; dispatch: Dispatch; now: number; potionStatus: PotionStatus | undefined; state: AppState }): ReactNode {
   const { w, p, z, edit, dispatch, now } = props;
   return (
     <Rnd
@@ -152,7 +152,7 @@ function WidgetFrame(props: { w: WidgetDef; p: Placement; z: number; edit: boole
           )}
         </div>
         <div className="widget-content" style={{ zoom: p.scale }}>
-          <WidgetContent w={w} dispatch={dispatch} now={now} potionStatus={props.potionStatus} />
+          <WidgetContent w={w} dispatch={dispatch} now={now} potionStatus={props.potionStatus} state={props.state} />
         </div>
         {edit && <div className="edit-shield" />}
       </div>
@@ -162,7 +162,8 @@ function WidgetFrame(props: { w: WidgetDef; p: Placement; z: number; edit: boole
 
 function EditToolbar({ state, dispatch }: { state: AppState; dispatch: Dispatch }): ReactNode {
   const profile = state.profiles.find((p) => p.id === state.activeProfileId)!;
-  const hidden = state.widgetOrder.filter((id) => !profile.placements[id]?.visible);
+  const hidden = state.widgetOrder.filter((id) => state.widgets[id]?.type !== 'exp' &&
+    state.widgets[id]?.type !== 'meso' && !profile.placements[id]?.visible);
   return (
     <div className="edit-toolbar" data-interactive>
       <strong>Editing layout</strong>
@@ -193,7 +194,7 @@ function EditToolbar({ state, dispatch }: { state: AppState; dispatch: Dispatch 
           </optgroup>
         )}
         <optgroup label="Create new widget">
-          {WIDGET_TYPES.map((t) => (
+          {WIDGET_TYPES.filter(t => t !== 'exp' && t !== 'meso').map((t) => (
             <option key={t} value={`add:${t}`}>
               {WIDGET_LABELS[t]}
             </option>
@@ -231,8 +232,8 @@ export function OverlayApp(): ReactNode {
         state.widgetOrder.map((id, i) => {
           const w = state.widgets[id];
           const p = profile.placements[id];
-          if (!w || !p?.visible) return null;
-          return <WidgetFrame key={id} w={w} p={p} z={i + 1} edit={edit} dispatch={dispatch} now={now} potionStatus={state.runtime.potionTracking[id]} />;
+          if (!w || w.type === 'exp' || w.type === 'meso' || !p?.visible) return null;
+          return <WidgetFrame key={id} w={w} p={p} z={i + 1} edit={edit} dispatch={dispatch} now={now} potionStatus={state.runtime.potionTracking[id]} state={state} />;
         })}
     </div>
   );

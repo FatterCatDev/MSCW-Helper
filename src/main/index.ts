@@ -4,7 +4,7 @@ import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IMAGE_SCHEME, IPC } from '../shared/ipc.ts';
 import { isAction, reducer, type Action } from '../shared/reducer.ts';
-import type { AppState, GameTrackingConfig, HotkeyAction, PersistedState, RuntimeState } from '../shared/types.ts';
+import type { AppState, GameTrackingConfig, HotkeyAction, PersistedState, RuntimeState, WidgetDef } from '../shared/types.ts';
 import { createAppIcon } from './icon.ts';
 import { Store } from './store.ts';
 import { getGameAssets, importGameAssets } from './game-assets.ts';
@@ -15,7 +15,9 @@ import { listGameWindows, windowPreviews } from './window-capture.ts';
 import { inspect } from 'node:util';
 import { watchGameWindow } from './game-window-lifecycle.ts';
 import { RecoveryLifecycle } from './recovery-lifecycle.ts';
+import { usedRecoveryItems } from '../shared/recovery.ts';
 import { NPC_RECOVERY_ITEMS } from '../shared/npc-recovery-prices.ts';
+import { resetSessionTimers } from '../shared/session-lifecycle.ts';
 
 const IMAGE_NAME_RE = /^[0-9a-f-]{36}\.(png|jpe?g|gif|webp|bmp)$/i;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -82,11 +84,8 @@ function broadcast(): void {
   const totals = new Map<number, number>();
   for (const widget of Object.values(store.get().widgets)) {
     if (widget.type !== 'meso') continue;
-    for (const item of Object.values(NPC_RECOVERY_ITEMS)) {
-      const key = widget.config.potions.find(p => p.itemId === item.itemId)?.id ?? `recovery-${item.itemId}`;
-      const count = widget.data.potionUses[key] ?? 0;
-      if (count) totals.set(item.itemId, (totals.get(item.itemId) ?? 0) + count);
-    }
+    for (const { itemId, count } of usedRecoveryItems(widget.data.potionUses, widget.config.potions))
+      totals.set(itemId, (totals.get(itemId) ?? 0) + count);
   }
   runtime.detectedPotions = [...totals].map(([itemId, count]) => ({ itemId, name: NPC_RECOVERY_ITEMS[itemId]!.name, count }));
   const state = fullState();
@@ -96,6 +95,9 @@ function broadcast(): void {
 }
 
 function dispatch(action: Action): void {
+  const training = action.type === 'training/reset' ? store.get().widgets[action.id] : undefined;
+  if (training?.type === 'training' && runtime.gameTracking.running &&
+      store.get().settings.gameTracking.expWidgetId === training.config.expId) gameTracking.resetBaseline();
   if (action.type === 'rate/reset' && runtime.gameTracking.running &&
       store.get().settings.gameTracking.expWidgetId === action.id) gameTracking.stop();
   const prev = store.get();
@@ -111,7 +113,8 @@ function dispatch(action: Action): void {
   }
   if (next === prev) return;
   store.set(next);
-  applySideEffects(prev, next, action.type === 'rate/reset' || action.type === 'potion/reset' ? action.id : undefined);
+  applySideEffects(prev, next, training?.type === 'training' ? training.config.mesoId :
+    action.type === 'rate/reset' || action.type === 'potion/reset' ? action.id : undefined);
   broadcast();
 }
 
@@ -477,25 +480,26 @@ function registerIpc(): void {
     if (debugMode !== undefined && typeof debugMode !== 'boolean') throw new Error('Debug mode must be true or false.');
     if (debugMode === true && !runtime.debugMode) enableDebug();
     const saved = store.get().settings.gameTracking;
-    const target = (type: 'exp', savedId: string): string => {
-      if (store.get().widgets[savedId]?.type === type) return savedId;
-      let widget = Object.values(store.get().widgets).find(w => w.type === type);
+    const target = (savedId: string): WidgetDef<'training'> => {
+      let widget = Object.values(store.get().widgets).find(w => w.type === 'training' && w.config.expId === savedId);
+      if (!widget) widget = Object.values(store.get().widgets).find(w => w.type === 'training');
       if (!widget) {
-        dispatch({ type: 'widget/add', widgetType: type });
-        widget = Object.values(store.get().widgets).find(w => w.type === type);
+        dispatch({ type: 'widget/add', widgetType: 'training' });
+        widget = Object.values(store.get().widgets).find(w => w.type === 'training');
       }
-      if (!widget) throw new Error(`Could not create the ${type} tracker.`);
-      return widget.id;
+      if (!widget || widget.type !== 'training') throw new Error('Could not create the Training Tracker.');
+      return widget;
     };
+    const training = target(saved.expWidgetId);
     const config = { ...saved, sourceId, windowName: source.name,
-      expWidgetId: target('exp', saved.expWidgetId) };
+      expWidgetId: training.config.expId, mesoWidgetId: training.config.mesoId };
     dispatch({ type: 'settings/set', patch: { gameTracking: config } });
     await gameTracking.start(config);
     if (!runtime.gameTracking.running) throw new Error(runtime.gameTracking.message);
     monitorGameWindow(sourceId);
     runtime.initializing = false;
     dispatch({ type: 'settings/set', patch: { overlayVisible: true } });
-    for (const id of [config.expWidgetId]) {
+    for (const id of [training.id]) {
       dispatch({ type: 'placement/set', id, patch: { visible: true } });
     }
     createOverlay();
@@ -607,6 +611,7 @@ function registerIpc(): void {
 function start(): void {
   app.setAppUserModelId('com.mscwhelper.app');
   store = new Store(join(app.getPath('userData'), 'mscw-helper.json'));
+  store.set(resetSessionTimers(store.get(), Date.now()));
   potionCapture = new PotionCapture(dispatch, (id, status) => {
     if (runtime.debugMode && runtime.potionTracking[id]?.message !== status.message) console.info('[potions]', status.message);
     runtime.potionTracking[id] = status;
@@ -689,6 +694,7 @@ function start(): void {
     stopGameWindowWatch = null;
     potionCapture.dispose();
     gameTracking.dispose();
+    store.set(resetSessionTimers(store.get(), null));
     store.flush();
   });
   app.on('will-quit', () => globalShortcut.unregisterAll());

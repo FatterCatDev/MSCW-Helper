@@ -69,6 +69,23 @@ test('independent Meso Trackers start and stop independently', () => {
   assert.equal(f.starts.length, 2);
 });
 
+test('resetting one Training Tracker rebaselines only its recovery capture', () => {
+  const f = fixture();
+  const first = Object.values(f.getState().widgets).find(w => w.type === 'training');
+  assert.ok(first?.type === 'training');
+  f.setState(reducer(f.getState(), { type: 'widget/add', widgetType: 'training' }));
+  const second = Object.values(f.getState().widgets).filter(w => w.type === 'training').at(-1);
+  assert.ok(second?.type === 'training');
+  f.update({ selectedPotions: { hp: null, mp: 2010005 } }, first.config.mesoId);
+  f.update({ selectedPotions: { hp: 2000000, mp: null } }, second.config.mesoId);
+  f.sync(true);
+  f.setState(reducer(f.getState(), { type: 'training/reset', id: first.id }));
+  f.sync(true, first.config.mesoId);
+  assert.deepEqual(f.stops, [first.config.mesoId]);
+  assert.equal(f.starts.filter(s => s.id === first.config.mesoId).length, 2);
+  assert.equal(f.starts.filter(s => s.id === second.config.mesoId).length, 1);
+});
+
 test('failed automatic starts report errors once and retry after configuration changes', () => {
   const f = fixture();
   f.update({ selectedPotions: { hp: null, mp: 2010005 } });

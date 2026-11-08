@@ -192,6 +192,14 @@ export function WidgetConfigEditor(props: { w: WidgetDef; state: AppState; dispa
   const { w, state, dispatch } = props;
   const setConfig = (patch: object): void => dispatch({ type: 'widget/config', id: w.id, config: patch as Record<string, unknown> });
   switch (w.type) {
+    case 'training': {
+      const meso = state.widgets[w.config.mesoId];
+      if (!meso || meso.type !== 'meso') return <p role="alert">Training Tracker data is unavailable.</p>;
+      const setMeso = (patch: Partial<WidgetConfigMap['meso']>): void =>
+        dispatch({ type: 'widget/config', id: meso.id, config: patch });
+      return <><MesoEditor w={meso} state={state} setConfig={setMeso} />
+        <PotionEditor w={meso} status={state.runtime.potionTracking[meso.id]} setConfig={setMeso} /></>;
+    }
     case 'meso':
       return <><MesoEditor w={w} state={state} setConfig={setConfig} /><PotionEditor w={w} status={state.runtime.potionTracking[w.id]} setConfig={setConfig} /></>;
     case 'timers':

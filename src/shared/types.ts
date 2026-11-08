@@ -1,4 +1,4 @@
-export const WIDGET_TYPES = ['exp', 'meso', 'session', 'timers', 'boss', 'notes', 'image'] as const;
+export const WIDGET_TYPES = ['training', 'exp', 'meso', 'session', 'timers', 'boss', 'notes', 'image'] as const;
 export type WidgetType = (typeof WIDGET_TYPES)[number];
 
 export interface TimerEntry {
@@ -23,6 +23,7 @@ export interface BossEntry {
 }
 
 export interface WidgetConfigMap {
+  training: { expId: string; mesoId: string };
   exp: Record<string, never>;
   meso: { goal: number; potions: PotionTracker[]; selectedPotions: RecoveryPotionSelection };
   session: Record<string, never>;
@@ -38,6 +39,7 @@ export interface RateSample {
 }
 
 export interface WidgetDataMap {
+  training: Record<string, never>;
   exp: {
     unit: 'points';
     samples: RateSample[];

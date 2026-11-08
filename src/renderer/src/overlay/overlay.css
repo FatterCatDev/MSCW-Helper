@@ -434,3 +434,7 @@ body.overlay-body,
   background: rgba(0, 0, 0, 0.6);
   border-radius: 6px;
 }
+.training-used { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.training-used-item { display: inline-flex; gap: 3px; align-items: center; }
+.training-used-item + .training-used-item::before { content: "/"; margin-right: 3px; }
+.training-used-item .potion-icon { width: 24px; height: 24px; }

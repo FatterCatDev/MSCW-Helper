@@ -21,9 +21,8 @@ Manual tracking remains available; OCR is experimental.
 
 | Widget | What it does |
 | --- | --- |
-| EXP Tracker | Automatic level/EXP points/percentage readings; EXP/min, ten-minute average, session net EXP and estimated time-to-level |
-| Meso Tracker | Manual wallet tracking and potion expenses; previous loot totals retained, automatic loot tracking currently disabled |
-| Session Timer | Start / pause / reset stopwatch |
+| Training Tracker | EXP readings, rates and graph; manual wallet tracking, potion expenses and used-item counts. Automatic meso/loot tracking is currently disabled. |
+| Session Timer | Starts automatically on app launch and resets on shutdown; manual start, pause and reset controls remain available |
 | Buff / Cooldown Timers | Click (or press a global hotkey) to start; warning pulse + beep; optional auto-repeat |
 | Boss / Event Timers | Respawn countdowns (“Killed” button) or daily scheduled times |
 | Notes & Checklist | Free notes + checklist that can auto-uncheck at daily reset |
@@ -150,8 +149,10 @@ ten minutes, warming up over available elapsed time until ten minutes have passe
 Sparse readings are interpolated and the last value is held between updates,
 so these are estimates and idle rates decay. Record frequently for useful rates.
 **Session EXP (net)** retains all gains minus losses until **Reset**, independently
-of the rolling history and Session Timer widget. Sessions persist across restarts;
-reset when beginning a new play session.
+of the rolling history and Session Timer widget. EXP totals persist across restarts;
+reset them when beginning a new play session. The Session Timer starts fresh on
+app launch and resets on shutdown, including when the game window closes.
+Timers added after launch can be started manually.
 
 Old kill-counter widgets and their placements are removed when loading saved
 layouts. Old percentage EXP history is cleared rather than mistaken for points;
@@ -159,7 +160,7 @@ other widgets and layout settings are preserved.
 
 ### Potion expenses (experimental)
 
-Select a **Meso Tracker** in the control panel:
+Select a **Training Tracker** in the control panel:
 
 Hotkey icon/quantity detection has been removed. Potion use is now estimated from
 changes to the bottom HP/MP current/max numbers, using the same bitmap-font video
@@ -169,7 +170,7 @@ capture as EXP (up to 30 FPS, no screenshot uploads).
    refresh the preview and select **HP current/max numbers** and **MP current/max
    numbers**. Select the complete numeric field, such as `[1084/1995]`, excluding
    the HP/MP label and coloured gauge. Save each region and restart capture.
-2. In the overlay **Meso Tracker**, use the **HP recovery** and **MP recovery**
+2. In the overlay **Training Tracker**, use the **HP recovery** and **MP recovery**
    icon dropdowns to select one item for each stat. Only items restoring that stat
    appear in its dropdown. Item names and base recovery amounts are available in
    tooltips; verified item icons come from MapleStory.io (GMS v62) and require a connection.
@@ -209,8 +210,13 @@ Recovery during these interruptions can be missed. HP and MP must both be readab
 
 Price overrides remain available under **Recovery item prices and estimated
 counts**. Old item IDs, manual prices and past expenses are preserved; old hotkey
-and count-region metadata is discarded. Resetting the Meso Tracker clears recovery
-events/costs; **Reset potion costs and recovery events** leaves wallet samples alone.
+and count-region metadata is discarded. The Training Tracker displays only items
+with recorded uses, including items selected earlier in the session. **Reset tracker**
+clears EXP, wallet and recovery totals together, preserving selected items and
+prices, and establishes new capture baselines. **Reset potion costs and recovery
+events** in settings leaves EXP and wallet samples alone.
+Existing EXP and meso widgets are combined into a Training Tracker on upgrade;
+their saved data and selections are retained.
 Old multi-item selections migrate to the first eligible item in each stat dropdown.
 Changing prices or potion selection establishes a fresh baseline.
 Clearing both selections or stopping game capture stops recovery

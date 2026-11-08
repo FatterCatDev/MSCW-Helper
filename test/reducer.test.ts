@@ -11,8 +11,9 @@ const widgetOfType = <T extends WidgetDef['type']>(s: PersistedState, type: T): 
 test('default state has one layout with the starter widgets visible', () => {
   const s = defaultState();
   assert.equal(s.profiles.length, 1);
-  assert.equal(s.widgetOrder.length, 4);
-  for (const id of s.widgetOrder) assert.equal(s.profiles[0]!.placements[id]?.visible, true);
+  assert.equal(s.widgetOrder.length, 5);
+  for (const id of s.widgetOrder) assert.equal(s.profiles[0]!.placements[id]?.visible,
+    s.widgets[id]?.type !== 'exp' && s.widgets[id]?.type !== 'meso');
 });
 
 test('adding a widget shows it only in the active layout', () => {

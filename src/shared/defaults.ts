@@ -14,6 +14,7 @@ import { DEFAULT_EXP_REGION, DEFAULT_LEVEL_REGION, DEFAULT_HP_REGION, DEFAULT_MP
 import { normalizeRecoverySelection } from './recovery.ts';
 
 export const WIDGET_LABELS: Record<WidgetType, string> = {
+  training: 'Training Tracker',
   exp: 'EXP Tracker',
   meso: 'Meso Tracker',
   session: 'Session Timer',
@@ -24,6 +25,7 @@ export const WIDGET_LABELS: Record<WidgetType, string> = {
 };
 
 export const DEFAULT_SIZES: Record<WidgetType, { w: number; h: number }> = {
+  training: { w: 340, h: 680 },
   exp: { w: 300, h: 310 },
   meso: { w: 280, h: 300 },
   session: { w: 220, h: 110 },
@@ -39,6 +41,7 @@ export function newId(): string {
 
 export function defaultConfig<T extends WidgetType>(type: T): WidgetConfigMap[T] {
   const configs: WidgetConfigMap = {
+    training: { expId: '', mesoId: '' },
     exp: {},
     meso: { goal: 0, potions: [], selectedPotions: { hp: null, mp: null } },
     session: {},
@@ -61,6 +64,7 @@ export function defaultConfig<T extends WidgetType>(type: T): WidgetConfigMap[T]
 
 export function defaultData<T extends WidgetType>(type: T): WidgetDataMap[T] {
   const data: WidgetDataMap = {
+    training: {},
     exp: { unit: 'points', samples: [], current: null, required: 0, level: 1, gained: 0, startedAt: null, migrated: false, source: 'manual' },
     meso: { samples: [], potionCosts: 0, potionUses: {}, pickups: 0, loot: [], trackingStartedAt: null,
       recoveryEvents: [], unidentifiedRecoveries: 0 },
@@ -81,6 +85,12 @@ export function createWidget<T extends WidgetType>(type: T, title?: string): Wid
     config: defaultConfig(type),
     data: defaultData(type)
   } as WidgetDef<T>;
+}
+
+export function createTrainingWidgets(): { training: WidgetDef<'training'>; exp: WidgetDef<'exp'>; meso: WidgetDef<'meso'> } {
+  const exp = createWidget('exp'), meso = createWidget('meso'), training = createWidget('training');
+  training.config = { expId: exp.id, mesoId: meso.id };
+  return { training, exp, meso };
 }
 
 export function defaultPlacement(type: WidgetType, index: number): Placement {
@@ -115,12 +125,13 @@ export function defaultSettings(): Settings {
 }
 
 export function defaultState(): PersistedState {
-  const starters: WidgetType[] = ['exp', 'meso', 'session', 'timers'];
-  const widgets = starters.map((t) => createWidget(t));
+  const { training, exp, meso } = createTrainingWidgets();
+  const widgets: WidgetDef[] = [training, exp, meso, createWidget('session'), createWidget('timers')];
   const profile: LayoutProfile = {
     id: newId(),
     name: 'Default',
-    placements: Object.fromEntries(widgets.map((w, i) => [w.id, defaultPlacement(w.type, i)]))
+    placements: Object.fromEntries(widgets.map((w, i) => [w.id,
+      { ...defaultPlacement(w.type, i), visible: w.type !== 'exp' && w.type !== 'meso' }]))
   };
   return {
     version: 1,
@@ -274,6 +285,49 @@ export function normalizeState(raw: unknown): PersistedState {
     priceOverrides: Object.fromEntries(Object.entries(prices).filter((entry): entry is [string, number] =>
       typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0))
   };
+  const linked = new Set<string>();
+  for (const id of [...order]) {
+    const widget = widgets[id];
+    if (widget?.type !== 'training') continue;
+    for (const [type, field] of [['exp', 'expId'], ['meso', 'mesoId']] as const) {
+      let childId = widget.config[field];
+      if (typeof childId !== 'string' || widgets[childId]?.type !== type || linked.has(childId)) {
+        const child = createWidget(type);
+        childId = child.id;
+        widgets[childId] = child;
+        order.push(childId);
+        widget.config[field] = childId;
+      }
+      linked.add(childId);
+      for (const profile of profiles) {
+        const placement = profile.placements[childId];
+        if (placement) profile.placements[childId] = { ...placement, visible: false };
+      }
+    }
+  }
+  const unlinked = (type: 'exp' | 'meso', preferred: string): string[] => {
+    const ids = order.filter(id => widgets[id]?.type === type && !linked.has(id));
+    if (ids.includes(preferred)) return [preferred, ...ids.filter(id => id !== preferred)];
+    return ids;
+  };
+  const oldExp = unlinked('exp', gameTracking.expWidgetId), oldMeso = unlinked('meso', gameTracking.mesoWidgetId);
+  while (oldExp.length || oldMeso.length) {
+    const expId = oldExp.shift() ?? createWidget('exp').id;
+    const mesoId = oldMeso.shift() ?? createWidget('meso').id;
+    if (!widgets[expId]) { widgets[expId] = { ...createWidget('exp'), id: expId }; order.push(expId); }
+    if (!widgets[mesoId]) { widgets[mesoId] = { ...createWidget('meso'), id: mesoId }; order.push(mesoId); }
+    const training = createWidget('training');
+    training.config = { expId, mesoId };
+    widgets[training.id] = training; order.push(training.id);
+    for (const profile of profiles) {
+      const ep = profile.placements[expId], mp = profile.placements[mesoId];
+      const selected = ep?.visible ? ep : mp?.visible ? mp : ep ?? mp;
+      profile.placements[training.id] = { ...(selected ?? defaultPlacement('training', order.indexOf(training.id))),
+        h: Math.max(selected?.h ?? 0, DEFAULT_SIZES.training.h), visible: !!(ep?.visible || mp?.visible) };
+      if (ep) profile.placements[expId] = { ...ep, visible: false };
+      if (mp) profile.placements[mesoId] = { ...mp, visible: false };
+    }
+  }
   const hotkeys = { ...defaults.hotkeys };
   if (isObj(s.hotkeys)) {
     for (const action of HOTKEY_ACTIONS) {

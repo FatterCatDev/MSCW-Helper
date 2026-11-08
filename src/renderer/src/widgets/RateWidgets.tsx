@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { etaMs, expRateHistory, formatDuration, formatNumber, parseAmount, ratePerHour, rollingPerMinute } from '../../../shared/time.ts';
 import { EntryInput, Stat, type WidgetProps } from './common.tsx';
 import { useNow } from '../common/state.ts';
-import { PotionSelection } from '../common/PotionSelection.tsx';
+import { ItemIcon, PotionSelection } from '../common/PotionSelection.tsx';
+import { usedRecoveryItems } from '../../../shared/recovery.ts';
+import { NPC_RECOVERY_ITEMS } from '../../../shared/npc-recovery-prices.ts';
 
-export function ExpWidget({ w, dispatch }: WidgetProps<'exp'>): ReactNode {
+export function ExpWidget({ w, dispatch, embedded = false }: WidgetProps<'exp'> & { embedded?: boolean }): ReactNode {
   const { samples, current, required, gained, startedAt, migrated } = w.data;
   const tick = useNow(1000);
   const now = Math.max(tick, samples.at(-1)?.t ?? tick);
@@ -60,9 +62,10 @@ export function ExpWidget({ w, dispatch }: WidgetProps<'exp'>): ReactNode {
         </svg>
       </figure>
       {migrated && <p className="hint">Old percentage history was cleared; enter a points baseline.</p>}
-      {w.data.source === 'status-bar' ? <p className="hint">Level {w.data.level} · {w.data.percent?.toFixed(2) ?? '—'}% · Requirement ~{formatNumber(required)} EXP.
-        Automatic status-bar readings; session includes EXP losses. ETA and level-up rollover use an estimated requirement.</p> :
-      w.data.source === 'notifications' ? <p className="hint">Automatic gain notifications. Losses and hidden notifications are not included.</p> : <form className="exp-entry" onSubmit={event => {
+      {!embedded && w.data.source === 'status-bar' && <p className="hint">Level {w.data.level} · {w.data.percent?.toFixed(2) ?? '—'}% · Requirement ~{formatNumber(required)} EXP.
+        Automatic status-bar readings; session includes EXP losses. ETA and level-up rollover use an estimated requirement.</p>}
+      {!embedded && w.data.source === 'notifications' && <p className="hint">Automatic gain notifications. Losses and hidden notifications are not included.</p>}
+      {w.data.source === 'manual' && <form className="exp-entry" onSubmit={event => {
         event.preventDefault();
         const value = parseAmount(currentInput);
         const needed = parseAmount(requiredInput);
@@ -82,17 +85,17 @@ export function ExpWidget({ w, dispatch }: WidgetProps<'exp'>): ReactNode {
         <button type="submit">Record EXP</button>
       </form>}
       {error && <p role="alert" className="hint">{error}</p>}
-      <div className="row">
+      {!embedded && <div className="row">
         <span className="hint">{startedAt !== null && now - startedAt < 600_000 ? '10-min average warming up' : w.data.source === 'status-bar' ? 'Status-bar readings' : w.data.source === 'notifications' ? 'Notification readings' : 'Manual readings'}</span>
         <button className="ghost" onClick={() => dispatch({ type: 'rate/reset', id: w.id })}>
           Reset
         </button>
-      </div>
+      </div>}
     </div>
   );
 }
 
-export function MesoWidget({ w, dispatch, now, potionStatus }: WidgetProps<'meso'>): ReactNode {
+export function MesoWidget({ w, dispatch, now, potionStatus, embedded = false, controlId }: WidgetProps<'meso'> & { embedded?: boolean; controlId?: string }): ReactNode {
   const { samples } = w.data;
   const first = samples[0];
   const last = samples.at(-1);
@@ -103,6 +106,7 @@ export function MesoWidget({ w, dispatch, now, potionStatus }: WidgetProps<'meso
   const rate = automatic ? elapsed > 0 ? gained * 3600000 / elapsed : null : ratePerHour(samples);
   const goal = w.config.goal;
   const eta = goal > 0 && last ? etaMs(goal - last.value, rate) : null;
+  const used = usedRecoveryItems(w.data.potionUses, w.config.potions);
 
   return (
     <div className="widget-body">
@@ -113,18 +117,28 @@ export function MesoWidget({ w, dispatch, now, potionStatus }: WidgetProps<'meso
         <Stat label="Tracking" value={automatic || first ? formatDuration(elapsed, true) : '—'} />
         {automatic && <><Stat label="Meso pickups" value={formatNumber(w.data.pickups)} /><Stat label="Loot value (est.)" value={formatNumber(lootValue)} /></>}
         <Stat label="Potion cost (est.)" value={formatNumber(w.data.potionCosts)} className="bad" />
-        <Stat label="Identified recoveries (est.)" value={formatNumber(Object.values(w.data.potionUses).reduce((a, b) => a + b, 0))} />
-        <Stat label="Unidentified recoveries" value={formatNumber(w.data.unidentifiedRecoveries)} />
+        {w.data.unidentifiedRecoveries > 0 && <Stat label="Unidentified recoveries" value={formatNumber(w.data.unidentifiedRecoveries)} />}
         <Stat label="Farming net (est.)" value={automatic || first ? formatNumber(gained - w.data.potionCosts) : '—'} />
         {!automatic && goal > 0 && <Stat label="Goal ETA" value={last && last.value >= goal ? 'Reached!' : eta === null ? '—' : formatDuration(eta, true)} />}
       </div>
+      {used.length > 0 && <div className="training-used" aria-label="Estimated recovery items used">
+        {used.map(({ itemId, count }) => {
+          const item = NPC_RECOVERY_ITEMS[itemId]!;
+          return <span className="training-used-item" key={itemId} title={`${item.name}: ${count} used`}>
+            <ItemIcon id={itemId} />
+            <span>-{formatNumber(count)}</span>
+          </span>;
+        })}
+      </div>}
       {w.data.loot.some(item => item.unitValue === null) && <p className="hint">Unvalued loot excluded. Set prices in Settings.</p>}
       {automatic && <p className="hint">Retained previous notification totals. Automatic meso/loot tracking is currently disabled.</p>}
       <PotionSelection selected={w.config.selectedPotions} onChange={selectedPotions =>
         dispatch({ type: 'widget/config', id: w.id, config: { selectedPotions } })} />
-      <button className="ghost" onClick={() => window.mscw.openControl(w.id)}>Configure recovery tracking</button>
-      <p className="hint">{w.config.selectedPotions.hp === null && w.config.selectedPotions.mp === null ? 'No potions selected; potion tracking disabled.' :
-        potionStatus?.message ?? 'Waiting for game capture; recovery tracking starts automatically.'}</p>
+      {embedded && potionStatus?.message.startsWith('Automatic recovery tracking failed:') &&
+        <p role="alert" className="hint">{potionStatus.message}</p>}
+      <button className="ghost" onClick={() => window.mscw.openControl(controlId ?? w.id)}>Configure recovery tracking</button>
+      {!embedded && <p className="hint">{w.config.selectedPotions.hp === null && w.config.selectedPotions.mp === null ? 'No potions selected; potion tracking disabled.' :
+        potionStatus?.message ?? 'Waiting for game capture; recovery tracking starts automatically.'}</p>}
       {!automatic && goal > 0 && last && (
         <div className="bar">
           <div className="bar-fill" style={{ width: `${Math.min(100, (last.value / goal) * 100)}%` }} />
@@ -139,12 +153,12 @@ export function MesoWidget({ w, dispatch, now, potionStatus }: WidgetProps<'meso
           return true;
         }}
       />}
-      <div className="row">
+      {!embedded && <div className="row">
         <span className="hint">{automatic ? 'Automatic notification gains' : `${samples.length} samples`}</span>
         <button className="ghost" onClick={() => dispatch({ type: 'rate/reset', id: w.id })}>
           Reset
         </button>
-      </div>
+      </div>}
     </div>
   );
 }

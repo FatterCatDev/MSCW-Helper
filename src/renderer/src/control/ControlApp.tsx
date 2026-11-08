@@ -36,7 +36,7 @@ function WidgetsTab({ state, dispatch, selected, setSelected }: { state: AppStat
           }}
         >
           <option value="">+ Add widget…</option>
-          {WIDGET_TYPES.map((t) => (
+          {WIDGET_TYPES.filter(t => t !== 'exp' && t !== 'meso').map((t) => (
             <option key={t} value={t}>
               {WIDGET_LABELS[t]}
             </option>
@@ -45,7 +45,7 @@ function WidgetsTab({ state, dispatch, selected, setSelected }: { state: AppStat
         <ul className="widget-list">
           {state.widgetOrder.map((id) => {
             const item = state.widgets[id];
-            if (!item) return null;
+            if (!item || item.type === 'exp' || item.type === 'meso') return null;
             const visible = profile.placements[id]?.visible ?? false;
             return (
               <li key={id} className={id === selected ? 'selected' : ''} onClick={() => setSelected(id)}>
@@ -240,7 +240,8 @@ export function ControlApp(): ReactNode {
   );
 
   useEffect(() => {
-    if (state && (!selected || !state.widgets[selected])) setSelected(state.widgetOrder[0] ?? null);
+    if (state && (!selected || !state.widgets[selected])) setSelected(
+      state.widgetOrder.find(id => state.widgets[id]?.type !== 'exp' && state.widgets[id]?.type !== 'meso') ?? null);
   }, [state, selected]);
 
   if (!state) return <div className="loading">Loading…</div>;

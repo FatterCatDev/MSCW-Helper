@@ -42,7 +42,7 @@ export function GameTrackingSettings({ state, dispatch }: { state: AppState; dis
     <p className="hint">Detected game resolution: {status.resolution ? `${status.resolution.width} x ${status.resolution.height}` : 'Waiting for video frames'}.
       Reader: {status.reader === 'font' ? 'Bitmap font, every captured frame' : 'Waiting for recognizable status digits'}.</p>
     <p className="hint">Reads the bottom status bar: character level, EXP points and percentage. Select the numeric fields without labels;
-      HP/MP current/max fields feed the optional recovery tracker in Meso Tracker. The first confirmed reading sets an EXP baseline.
+      HP/MP current/max fields feed recovery tracking in Training Tracker. The first confirmed reading sets an EXP baseline.
       Automatic meso/loot tracking is disabled. ETA uses an estimated requirement from points/percentage, not an API-verified table.</p>
     <button disabled={busy || status.running} onClick={() => void run(async () => {
       const windows = await window.mscw.capturePreviews();
@@ -90,11 +90,15 @@ export function GameTrackingSettings({ state, dispatch }: { state: AppState; dis
         setRegion(null);
       }}>Save {field === 'level' ? 'level' : field.toUpperCase()} region</button>
     </>}
-    <label className="toggle">EXP tracker
-      <select aria-label="exp tracking widget" value={config.expWidgetId}
-        disabled={busy || status.running} onChange={e => update({ expWidgetId: e.target.value })}>
+    <label className="toggle">Training tracker
+      <select aria-label="Training tracker" value={config.expWidgetId}
+        disabled={busy || status.running} onChange={e => {
+          const training = Object.values(state.widgets).find(w => w.type === 'training' && w.config.expId === e.target.value);
+          update({ expWidgetId: e.target.value, mesoWidgetId: training?.type === 'training' ? training.config.mesoId : '' });
+        }}>
         <option value="">Select tracker...</option>
-        {Object.values(state.widgets).filter(w => w.type === 'exp').map(w => <option value={w.id} key={w.id}>{w.title}</option>)}
+        {Object.values(state.widgets).filter(w => w.type === 'training').map(w =>
+          w.type === 'training' && <option value={w.config.expId} key={w.id}>{w.title}</option>)}
       </select>
     </label>
     <div className="row-left">

@@ -1,7 +1,7 @@
 import type { HotkeyAction, Placement, PersistedState, RecoveryEvent, Settings, WidgetDef, WidgetType } from './types.ts';
 import { NPC_RECOVERY_ITEMS } from './npc-recovery-prices.ts';
 import { HOTKEY_ACTIONS, WIDGET_TYPES } from './types.ts';
-import { clampPlacement, createWidget, defaultData, defaultPlacement, newId } from './defaults.ts';
+import { clampPlacement, createWidget, createTrainingWidgets, defaultData, defaultPlacement, newId } from './defaults.ts';
 import { retainRateWindow } from './time.ts';
 import { isGameTrackingConfig } from './game-tracking.ts';
 
@@ -22,6 +22,7 @@ export type Action =
   | { type: 'settings/hotkey'; action: HotkeyAction; accelerator: string }
   | { type: 'rate/sample'; id: string; value: number; at: number }
   | { type: 'rate/reset'; id: string }
+  | { type: 'training/reset'; id: string }
   | { type: 'exp/sample'; id: string; value: number; required: number; level: number; at: number }
   | { type: 'exp/status'; id: string; value: number; required: number; level: number; percent: number; at: number }
   | { type: 'exp/start'; id: string }
@@ -43,7 +44,7 @@ export type Action =
 export const ACTION_TYPES: ReadonlySet<string> = new Set<Action['type']>([
   'widget/add', 'widget/remove', 'widget/rename', 'widget/config', 'widget/data', 'widget/front',
   'placement/set', 'profile/create', 'profile/rename', 'profile/delete', 'profile/activate', 'profile/next',
-  'settings/set', 'settings/hotkey', 'rate/sample', 'rate/reset', 'session/toggle', 'session/reset',
+  'settings/set', 'settings/hotkey', 'rate/sample', 'rate/reset', 'training/reset', 'session/toggle', 'session/reset',
   'timer/start', 'timer/stop', 'boss/mark', 'boss/clear', 'notes/dailyReset',
   'exp/sample', 'exp/status', 'exp/start', 'potion/used', 'potion/reset', 'recovery/event', 'recovery/resolve', 'tracking/start', 'tracking/gain', 'loot/value'
 ]);
@@ -74,6 +75,15 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
   switch (action.type) {
     case 'widget/add': {
       if (!WIDGET_TYPES.includes(action.widgetType)) return state;
+      if (action.widgetType === 'training') {
+        const { training, exp, meso } = createTrainingWidgets();
+        return { ...state, widgets: { ...state.widgets, [training.id]: training, [exp.id]: exp, [meso.id]: meso },
+          widgetOrder: [...state.widgetOrder, training.id, exp.id, meso.id],
+          profiles: state.profiles.map(p => ({ ...p, placements: { ...p.placements,
+            [training.id]: { ...defaultPlacement('training', state.widgetOrder.length), visible: p.id === state.activeProfileId },
+            [exp.id]: { ...defaultPlacement('exp', 0), visible: false },
+            [meso.id]: { ...defaultPlacement('meso', 0), visible: false } } })) };
+      }
       const w = createWidget(action.widgetType);
       const index = state.widgetOrder.length;
       const placement = defaultPlacement(w.type, index);
@@ -89,13 +99,15 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
     }
     case 'widget/remove': {
       if (!state.widgets[action.id]) return state;
-      const { [action.id]: _removed, ...widgets } = state.widgets;
+      const target = state.widgets[action.id];
+      const removed = new Set([action.id, ...(target?.type === 'training' ? [target.config.expId, target.config.mesoId] : [])]);
+      const widgets = Object.fromEntries(Object.entries(state.widgets).filter(([id]) => !removed.has(id)));
       return {
         ...state,
         widgets,
-        widgetOrder: state.widgetOrder.filter((id) => id !== action.id),
+        widgetOrder: state.widgetOrder.filter((id) => !removed.has(id)),
         profiles: state.profiles.map((p) => {
-          const { [action.id]: _gone, ...placements } = p.placements;
+          const placements = Object.fromEntries(Object.entries(p.placements).filter(([id]) => !removed.has(id)));
           return { ...p, placements };
         })
       };
@@ -238,6 +250,12 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
       const w = state.widgets[action.id];
       if (w?.type === 'exp') return updateWidget(state, action.id, 'exp', (e) => ({ ...e, data: defaultData('exp') }));
       return updateWidget(state, action.id, 'meso', (m) => ({ ...m, data: defaultData('meso') }));
+    }
+    case 'training/reset': {
+      const training = state.widgets[action.id];
+      if (!training || training.type !== 'training') return state;
+      const exp = reducer(state, { type: 'rate/reset', id: training.config.expId });
+      return reducer(exp, { type: 'rate/reset', id: training.config.mesoId });
     }
     case 'potion/used':
       return updateWidget(state, action.id, 'meso', (m) => {

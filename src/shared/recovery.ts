@@ -1,5 +1,17 @@
 import { NPC_RECOVERY_ITEMS } from './npc-recovery-prices.ts';
-import type { RecoveryPotionSelection, Vitals } from './types.ts';
+import type { PotionTracker, RecoveryPotionSelection, Vitals } from './types.ts';
+
+export function usedRecoveryItems(uses: Record<string, number>, prices: PotionTracker[]): { itemId: number; count: number }[] {
+  const counts = new Map<number, number>();
+  for (const [key, count] of Object.entries(uses)) {
+    if (!Number.isSafeInteger(count) || count <= 0) continue;
+    const saved = prices.find(p => p.id === key);
+    const match = /^recovery-(\d+)$/.exec(key);
+    const id = saved?.itemId ?? (match ? Number(match[1]) : null);
+    if (id !== null && NPC_RECOVERY_ITEMS[id]) counts.set(id, (counts.get(id) ?? 0) + count);
+  }
+  return [...counts].map(([itemId, count]) => ({ itemId, count }));
+}
 
 export function selectedRecoveryItems(selection: RecoveryPotionSelection): number[] {
   return [...new Set([selection.hp, selection.mp].filter((id): id is number => id !== null))];

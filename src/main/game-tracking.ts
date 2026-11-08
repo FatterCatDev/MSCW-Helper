@@ -100,6 +100,15 @@ export class GameTracking {
     this.status({ running: false, fps: 0, frames: 0, message });
   }
 
+  resetBaseline(): void {
+    if (!this.active) return;
+    this.active.previous = null;
+    this.active.required = null;
+    this.active.range = null;
+    this.active.message = 'Waiting for a fresh EXP baseline.';
+    this.publish();
+  }
+
   private publish(): void {
     const a = this.active;
     if (a) this.status({ running: true, fps: a.fps, frames: a.frames, message: a.message,

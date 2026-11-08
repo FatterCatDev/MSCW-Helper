@@ -4,7 +4,7 @@ import { recoveryIconUrl } from '../../../shared/recovery-icons.ts';
 import type { RecoveryPotionSelection } from '../../../shared/types.ts';
 import './potion-selection.css';
 
-function ItemIcon({ id, onError }: { id: number; onError: (id: number) => void }): ReactNode {
+export function ItemIcon({ id, onError }: { id: number; onError?: (id: number) => void }): ReactNode {
   const [failed, setFailed] = useState(false);
   const item = NPC_RECOVERY_ITEMS[id]!;
   const icon = recoveryIconUrl(id);
@@ -12,7 +12,7 @@ function ItemIcon({ id, onError }: { id: number; onError: (id: number) => void }
   return failed ? <span className="potion-icon-error" aria-label={`Icon unavailable: ${item.name}`}>!</span> :
     <img className="potion-icon" src={icon} alt={item.name}
       draggable={false} onError={() => {
-        setFailed(true); onError(id);
+        setFailed(true); onError?.(id);
         console.error(`[potion-icons] Could not load item icon ${id} (${item.name}).`);
       }} />;
 }
