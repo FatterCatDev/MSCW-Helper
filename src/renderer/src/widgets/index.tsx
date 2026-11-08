@@ -5,6 +5,7 @@ import { ImageWidget, NotesWidget } from './MiscWidgets.tsx';
 import { ExpWidget, MesoWidget } from './RateWidgets.tsx';
 import { BossWidget, SessionWidget, TimersWidget } from './TimeWidgets.tsx';
 import type { WidgetProps } from './common.tsx';
+import { trainingElapsed } from '../../../shared/training-time.ts';
 
 type Registry = { [K in WidgetType]: (props: WidgetProps<K>) => ReactNode };
 
@@ -24,7 +25,8 @@ export function WidgetContent(props: { w: WidgetDef; dispatch: Dispatch; now: nu
     const exp = props.state.widgets[props.w.config.expId], meso = props.state.widgets[props.w.config.mesoId];
     if (exp?.type !== 'exp' || meso?.type !== 'meso') return <p role="alert">Training Tracker data is unavailable.</p>;
     return <div className="training-tracker">
-      <ExpWidget w={exp} dispatch={props.dispatch} now={props.now} embedded />
+      <ExpWidget w={exp} dispatch={props.dispatch} now={props.now} embedded trainingMs={trainingElapsed(props.w.data, props.now)}
+        mesoSamples={meso.data.samples} />
       <MesoWidget w={meso} dispatch={props.dispatch} now={props.now}
         potionStatus={props.state.runtime.potionTracking[meso.id]} embedded controlId={props.w.id} />
       <button className="ghost" onClick={() => props.dispatch({ type: 'training/reset', id: props.w.id })}>Reset tracker</button>

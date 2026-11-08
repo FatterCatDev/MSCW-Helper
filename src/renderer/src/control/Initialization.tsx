@@ -22,7 +22,7 @@ export function Initialization(): ReactNode {
   const selected = windows.find(w => w.id === sourceId);
   return <main className="page initialization">
     <h1>MSCW Helper Initialization</h1>
-    <p>Choose your MapleStory game window, then click Start to read the bottom level and EXP status bar. Automatic meso/loot tracking is disabled for now.</p>
+    <p>Choose your MapleStory game window, then click Start to read the bottom level and EXP status bar. Open the inventory to track mesos.</p>
     <label className="toggle">Game window
       <select aria-label="Game window" value={sourceId} disabled={busy} onChange={e => setSourceId(e.target.value)}>
         <option value="">Select a game window...</option>

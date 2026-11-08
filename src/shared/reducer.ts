@@ -13,6 +13,7 @@ export type Action =
   | { type: 'widget/data'; id: string; data: Record<string, unknown> }
   | { type: 'widget/front'; id: string }
   | { type: 'placement/set'; id: string; patch: Partial<Placement> }
+  | { type: 'safe-summary/move'; x: number; y: number }
   | { type: 'profile/create'; name: string; copyFromId?: string }
   | { type: 'profile/rename'; id: string; name: string }
   | { type: 'profile/delete'; id: string }
@@ -43,7 +44,7 @@ export type Action =
 
 export const ACTION_TYPES: ReadonlySet<string> = new Set<Action['type']>([
   'widget/add', 'widget/remove', 'widget/rename', 'widget/config', 'widget/data', 'widget/front',
-  'placement/set', 'profile/create', 'profile/rename', 'profile/delete', 'profile/activate', 'profile/next',
+  'placement/set', 'safe-summary/move', 'profile/create', 'profile/rename', 'profile/delete', 'profile/activate', 'profile/next',
   'settings/set', 'settings/hotkey', 'rate/sample', 'rate/reset', 'training/reset', 'session/toggle', 'session/reset',
   'timer/start', 'timer/stop', 'boss/mark', 'boss/clear', 'notes/dailyReset',
   'exp/sample', 'exp/status', 'exp/start', 'potion/used', 'potion/reset', 'recovery/event', 'recovery/resolve', 'tracking/start', 'tracking/gain', 'loot/value'
@@ -134,12 +135,21 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
         })
       };
     }
+    case 'safe-summary/move':
+      if (!finite(action.x) || !finite(action.y)) return state;
+      return { ...state, profiles: state.profiles.map(p => p.id !== state.activeProfileId ? p : {
+        ...p, safeSummaryPosition: {
+          x: Math.max(-5000, Math.min(20000, Math.round(action.x))),
+          y: Math.max(-5000, Math.min(20000, Math.round(action.y)))
+        }
+      }) };
     case 'profile/create': {
       const source = state.profiles.find((p) => p.id === (action.copyFromId ?? state.activeProfileId));
       const profile = {
         id: newId(),
         name: String(action.name || 'New layout').slice(0, 40),
-        placements: source ? structuredClone(source.placements) : {}
+        placements: source ? structuredClone(source.placements) : {},
+        ...(source?.safeSummaryPosition ? { safeSummaryPosition: { ...source.safeSummaryPosition } } : {})
       };
       return { ...state, profiles: [...state.profiles, profile], activeProfileId: profile.id };
     }
@@ -190,11 +200,18 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
       if (!finite(action.value) || !finite(action.at)) return state;
       return updateWidget(state, action.id, 'meso', (m) => {
         if (m.data.samples.at(-1) && action.at <= m.data.samples.at(-1)!.t) return m;
-        return { ...m, data: { ...m.data, samples: [...m.data.samples, { t: action.at, value: Math.max(0, action.value) }].slice(-500) } };
+        const samples = [...m.data.samples, { t: action.at, value: Math.max(0, action.value) }];
+        const recent = retainRateWindow(samples, action.at);
+        return { ...m, data: { ...m.data, samples: recent[0] === samples[0] ? recent : [samples[0]!, ...recent] } };
       });
     }
-    case 'exp/start':
-      return updateWidget(state, action.id, 'exp', e => ({ ...e, data: { ...defaultData('exp'), source: 'status-bar' } }));
+    case 'exp/start': {
+      const exp = updateWidget(state, action.id, 'exp', e => ({ ...e, data: { ...defaultData('exp'), source: 'status-bar' } }));
+      if (exp === state) return state;
+      const training = Object.values(exp.widgets).find(w => w.type === 'training' && w.config.expId === action.id);
+      return training?.type === 'training' ?
+        updateWidget(exp, training.id, 'training', w => ({ ...w, data: defaultData('training') })) : exp;
+    }
     case 'exp/sample':
     case 'exp/status':
       return updateWidget(state, action.id, 'exp', (e) => {
@@ -254,7 +271,8 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
     case 'training/reset': {
       const training = state.widgets[action.id];
       if (!training || training.type !== 'training') return state;
-      const exp = reducer(state, { type: 'rate/reset', id: training.config.expId });
+      const reset = updateWidget(state, action.id, 'training', w => ({ ...w, data: defaultData('training') }));
+      const exp = reducer(reset, { type: 'rate/reset', id: training.config.expId });
       return reducer(exp, { type: 'rate/reset', id: training.config.mesoId });
     }
     case 'potion/used':

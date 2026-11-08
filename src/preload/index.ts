@@ -31,6 +31,8 @@ const api: MscwApi = {
   stopGameTracking: () => ipcRenderer.invoke(IPC.stopGameTracking),
   captureConfig: () => ipcRenderer.invoke(IPC.captureConfig),
   captureFrame: (image, width, height) => ipcRenderer.send(IPC.captureFrame, image, width, height),
+  captureMap: (image, kind) => ipcRenderer.send(IPC.captureMap, image, kind),
+  captureInventory: (reading, capturedAt) => ipcRenderer.send(IPC.captureInventory, reading, capturedAt),
   captureError: (message) => ipcRenderer.send(IPC.captureError, message),
   quit: () => ipcRenderer.send(IPC.quit)
 };

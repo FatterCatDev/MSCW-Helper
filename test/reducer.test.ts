@@ -46,6 +46,23 @@ test('placement changes only affect the active layout and are clamped', () => {
   assert.notEqual(other.placements[id]!.x, 123);
 });
 
+test('safe summary position is saved per layout, copied and restored', () => {
+  let state = defaultState();
+  const first = state.activeProfileId;
+  assert.equal(isAction({ type: 'safe-summary/move', x: 123, y: 321 }), true);
+  state = reducer(state, { type: 'safe-summary/move', x: 123.4, y: 321.3 });
+  state = reducer(state, { type: 'profile/create', name: 'Copy' });
+  const second = state.activeProfileId;
+  assert.deepEqual(state.profiles.find(p => p.id === second)?.safeSummaryPosition, { x: 123, y: 321 });
+  state = reducer(state, { type: 'safe-summary/move', x: 999, y: 456 });
+  const loaded = normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(loaded.profiles.find(p => p.id === first)?.safeSummaryPosition, { x: 123, y: 321 });
+  assert.deepEqual(loaded.profiles.find(p => p.id === second)?.safeSummaryPosition, { x: 999, y: 456 });
+  assert.equal(reducer(loaded, { type: 'safe-summary/move', x: NaN, y: 1 }), loaded);
+  delete loaded.profiles[0]!.safeSummaryPosition;
+  assert.equal(normalizeState(loaded).profiles[0]!.safeSummaryPosition, undefined);
+});
+
 test('cannot delete the last layout; deleting active switches to another', () => {
   let s = defaultState();
   assert.equal(run(s, { type: 'profile/delete', id: s.activeProfileId }), s);

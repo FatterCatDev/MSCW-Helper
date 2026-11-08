@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Store } from '../src/main/store.ts';
 import { defaultState } from '../src/shared/defaults.ts';
 import { reducer } from '../src/shared/reducer.ts';
-import { resetSessionTimers } from '../src/shared/session-lifecycle.ts';
+import { resetSessionPotions, resetSessionTimers } from '../src/shared/session-lifecycle.ts';
 
 test('launch starts all saved session timers fresh and shutdown resets them', () => {
   let state = defaultState();
@@ -73,4 +73,61 @@ test('manual pause, resume and reset remain available after automatic start', ()
   assert.deepEqual(state.widgets[timer.id]?.data, { running: true, startedAt: 5000, accumulatedMs: 3000 });
   state = reducer(state, { type: 'session/reset', id: timer.id });
   assert.deepEqual(state.widgets[timer.id]?.data, { running: false, startedAt: 0, accumulatedMs: 0 });
+});
+
+test('potion session totals reset across shutdown and unclean relaunch while configuration and other data survive', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mscw-potion-session-'));
+  const file = join(dir, 'state.json');
+  try {
+    const store = new Store(file);
+    let state = reducer(store.get(), { type: 'widget/add', widgetType: 'training' });
+    const mesos = Object.values(state.widgets).filter(w => w.type === 'meso');
+    assert.equal(mesos.length, 2);
+    const prices = [{ id: 'lemon-price', itemId: 2010005, name: 'Lemon', unitCost: 150 }];
+    for (const meso of mesos) {
+      state = reducer(state, { type: 'widget/config', id: meso.id,
+        config: { potions: prices, selectedPotions: { hp: null, mp: 2010005 } } });
+      state = reducer(state, { type: 'rate/sample', id: meso.id, value: 500, at: 1 });
+      state = reducer(state, { type: 'recovery/event', id: meso.id, event: {
+        id: 'matched', at: 2, hp: 0, mp: 150, candidates: [2010005], itemId: 2010005, cost: 150, reason: 'matched'
+      } });
+      state = reducer(state, { type: 'recovery/event', id: meso.id, event: {
+        id: 'unknown', at: 3, hp: 0, mp: 12, candidates: [], itemId: null, cost: null, reason: 'unknown'
+      } });
+    }
+    store.set(state);
+    store.flush();
+    const reopened = new Store(file);
+    const launched = resetSessionPotions(reopened.get());
+    for (const original of mesos) {
+      const current = launched.widgets[original.id];
+      assert.ok(current?.type === 'meso');
+      assert.equal(current.data.potionCosts, 0);
+      assert.deepEqual(current.data.potionUses, {});
+      assert.deepEqual(current.data.recoveryEvents, []);
+      assert.equal(current.data.unidentifiedRecoveries, 0);
+      assert.deepEqual(current.data.samples, [{ t: 1, value: 500 }]);
+      assert.deepEqual(current.config.potions, prices);
+      assert.deepEqual(current.config.selectedPotions, { hp: null, mp: 2010005 });
+      const stale = reopened.get().widgets[original.id];
+      assert.ok(stale?.type === 'meso');
+      assert.equal(stale.data.potionCosts, 150);
+      assert.equal(stale.data.unidentifiedRecoveries, 1);
+    }
+    reopened.set(resetSessionPotions(state));
+    reopened.flush();
+    const saved = new Store(file).get();
+    for (const original of mesos) {
+      const current = saved.widgets[original.id];
+      assert.ok(current?.type === 'meso');
+      assert.equal(current.data.potionCosts, 0);
+      assert.deepEqual(current.data.potionUses, {});
+      assert.deepEqual(current.data.recoveryEvents, []);
+      assert.equal(current.data.unidentifiedRecoveries, 0);
+      assert.deepEqual(current.config.potions, prices);
+    }
+  } finally {
+    unlinkSync(file);
+    rmdirSync(dir);
+  }
 });

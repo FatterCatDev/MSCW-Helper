@@ -6,6 +6,8 @@ import { WIDGET_TYPES, type AppState, type Placement, type PotionStatus, type Wi
 import { beep, useAppState, useNow, type Dispatch } from '../common/state.ts';
 import { WidgetContent } from '../widgets/index.tsx';
 import { DebugWidget } from './DebugWidget.tsx';
+import { formatDuration, formatNumber } from '../../../shared/time.ts';
+import { trainingElapsed } from '../../../shared/training-time.ts';
 
 const INTERACTIVE = '.widget-rnd, .debug-rnd, [data-interactive]';
 const EDITABLE = 'input:not([type=checkbox]):not([type=range]):not([type=button]), textarea, select';
@@ -219,20 +221,62 @@ export function OverlayApp(): ReactNode {
   if (!state) return null;
   const edit = state.runtime.editMode;
   const profile = state.profiles.find((p) => p.id === state.activeProfileId);
+  const map = state.runtime.map;
+  const onlyPrompt = state.runtime.gameTracking.running && (map.state === 'missing' || map.state === 'searching' || map.state === 'reading');
+  const onlySummary = state.runtime.gameTracking.running && map.state === 'safe';
+  const exp = state.widgets[state.settings.gameTracking.expWidgetId];
+  const meso = state.widgets[state.settings.gameTracking.mesoWidgetId];
+  const training = Object.values(state.widgets).find(w =>
+    w.type === 'training' && w.config.expId === state.settings.gameTracking.expWidgetId);
+  const first = meso?.type === 'meso' ? meso.data.samples[0] : undefined;
+  const last = meso?.type === 'meso' ? meso.data.samples.at(-1) : undefined;
+  const mesoDelta = first && last ? last.value - first.value : null;
 
   return (
     <div className={`overlay-root ${edit ? 'edit' : ''}`}>
-      {state.settings.gameTracking.sourceId && <div className="capture-fps">
+      {onlyPrompt && <div className="map-notice" role="status">{map.state === 'missing'
+        ? 'Click the + icon on the minimap until the map name is visible.' : map.message}</div>}
+      {onlySummary && <Rnd className={`widget-rnd safe-summary-rnd ${edit ? 'editing' : ''}`}
+        size={{ width: 280, height: 'auto' }}
+        position={profile?.safeSummaryPosition ?? { x: Math.max(0, window.innerWidth - 296), y: 16 }}
+        bounds="parent" disableDragging={!edit} enableResizing={false} dragGrid={[4, 4]}
+        onDragStop={(_event, position) => dispatch({ type: 'safe-summary/move', x: position.x, y: position.y })}>
+        <div className="map-notice safe-summary" role="status">
+          <strong>SAFE AREA</strong>
+          <div>{map.name}</div>
+          <div className="hint">{map.source === 'shop' ? 'Shop identified from minimap' : 'Estimated from GMS map data'}</div>
+          <div>Session EXP: {exp?.type === 'exp' && exp.data.startedAt !== null ? formatNumber(exp.data.gained) : '—'}</div>
+          <div>Training time: {training?.type === 'training' ? formatDuration(trainingElapsed(training.data, now), true) : '—'}</div>
+          <div>Session mesos: {mesoDelta === null ? '—' :
+            `${mesoDelta > 0 ? '+' : ''}${formatNumber(mesoDelta)}`}</div>
+          {state.runtime.inventory.state !== 'open' && <div className="hint">{state.runtime.inventory.message}</div>}
+        </div>
+      </Rnd>}
+      {!onlyPrompt && !onlySummary && (map.state === 'unknown' || state.runtime.inventory.state !== 'open') &&
+        <div className="map-notice" role="status">
+          {map.state === 'unknown' && <div>Map safety unknown: {map.message}</div>}
+          {state.runtime.inventory.state !== 'open' && <div>{state.runtime.inventory.message}</div>}
+        </div>}
+      {!onlyPrompt && !onlySummary && state.settings.gameTracking.sourceId && <div className="capture-fps">
         Capture: {state.runtime.gameTracking.fps.toFixed(1)} / 30 FPS
         {!state.runtime.gameTracking.running && ' (stopped)'}
       </div>}
-      {edit && <EditToolbar state={state} dispatch={dispatch} />}
-      {state.runtime.debugMode && <DebugWidget runtime={state.runtime} />}
-      {profile &&
+      {!onlyPrompt && !onlySummary && edit && <EditToolbar state={state} dispatch={dispatch} />}
+      {onlySummary && edit && profile && <div className="edit-toolbar" data-interactive>
+        <strong>Editing layout</strong>
+        <select aria-label="Layout" value={state.activeProfileId}
+          onChange={event => dispatch({ type: 'profile/activate', id: event.target.value })}>
+          {state.profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <button onClick={() => window.mscw.setEditMode(false)}>Done{state.settings.hotkeys.toggleEdit && <kbd>{state.settings.hotkeys.toggleEdit}</kbd>}</button>
+      </div>}
+      {!onlyPrompt && !onlySummary && state.runtime.debugMode && <DebugWidget runtime={state.runtime} />}
+      {!onlyPrompt && profile &&
         state.widgetOrder.map((id, i) => {
           const w = state.widgets[id];
           const p = profile.placements[id];
           if (!w || w.type === 'exp' || w.type === 'meso' || !p?.visible) return null;
+          if (onlySummary && w.type !== 'session') return null;
           return <WidgetFrame key={id} w={w} p={p} z={i + 1} edit={edit} dispatch={dispatch} now={now} potionStatus={state.runtime.potionTracking[id]} state={state} />;
         })}
     </div>

@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { etaMs, expRateHistory, formatDuration, formatNumber, parseAmount, ratePerHour, rollingPerMinute } from '../../../shared/time.ts';
-import { EntryInput, Stat, type WidgetProps } from './common.tsx';
+import { etaMs, expRateHistory, formatDuration, formatNumber, parseAmount, rollingPerMinute } from '../../../shared/time.ts';
+import type { RateSample } from '../../../shared/types.ts';
+import { Stat, type WidgetProps } from './common.tsx';
 import { useNow } from '../common/state.ts';
 import { ItemIcon, PotionSelection } from '../common/PotionSelection.tsx';
 import { usedRecoveryItems } from '../../../shared/recovery.ts';
 import { NPC_RECOVERY_ITEMS } from '../../../shared/npc-recovery-prices.ts';
 
-export function ExpWidget({ w, dispatch, embedded = false }: WidgetProps<'exp'> & { embedded?: boolean }): ReactNode {
+export function ExpWidget({ w, dispatch, embedded = false, trainingMs, mesoSamples }: WidgetProps<'exp'> & {
+  embedded?: boolean; trainingMs?: number; mesoSamples?: RateSample[]
+}): ReactNode {
   const { samples, current, required, gained, startedAt, migrated } = w.data;
   const tick = useNow(1000);
-  const now = Math.max(tick, samples.at(-1)?.t ?? tick);
+  const now = Math.max(tick, samples.at(-1)?.t ?? tick, mesoSamples?.at(-1)?.t ?? tick);
   const [levelInput, setLevel] = useState(String(w.data.level));
   const [currentInput, setCurrent] = useState('');
   const [requiredInput, setRequired] = useState(required ? String(required) : '');
@@ -24,17 +27,26 @@ export function ExpWidget({ w, dispatch, embedded = false }: WidgetProps<'exp'> 
   const eta = current === null ? null : etaMs(required - current, average === null ? null : average * 60);
   const graphSecond = Math.floor(now / 1000);
   const history = useMemo(() => expRateHistory(samples, graphSecond * 1000), [samples, graphSecond]);
+  const mesoHistory = useMemo(() => mesoSamples ? expRateHistory(mesoSamples, graphSecond * 1000) : [],
+    [mesoSamples, graphSecond]);
   const values = history.flatMap(point => point.value === null ? [] : [point.value]);
+  const mesoValues = mesoHistory.flatMap(point => point.value === null ? [] : [point.value]);
   const low = Math.min(0, ...values);
   const high = Math.max(1, ...values);
+  const mesoLow = Math.min(0, ...mesoValues);
+  const mesoHigh = Math.max(1, ...mesoValues);
   const graphY = (value: number): number => 14 + (high - value) / (high - low) * 78;
-  let connected = false;
-  const path = history.map((point, index) => {
-    if (point.value === null) { connected = false; return ''; }
-    const command = connected ? 'L' : 'M';
-    connected = true;
-    return `${command}${42 + index / 600 * 350},${graphY(point.value)}`;
-  }).join(' ');
+  const mesoY = (value: number): number => 14 + (mesoHigh - value) / (mesoHigh - mesoLow) * 78;
+  const graphRight = mesoSamples ? 350 : 392;
+  const path = (points: typeof history, y: (value: number) => number): string => {
+    let connected = false;
+    return points.map((point, index) => {
+      if (point.value === null) { connected = false; return ''; }
+      const command = connected ? 'L' : 'M';
+      connected = true;
+      return `${command}${42 + index / 600 * (graphRight - 42)},${y(point.value)}`;
+    }).filter(Boolean).join(' ');
+  };
 
   return (
     <div className="widget-body">
@@ -44,21 +56,31 @@ export function ExpWidget({ w, dispatch, embedded = false }: WidgetProps<'exp'> 
         <Stat label="10-min avg/min" value={average === null ? '—' : formatNumber(average)} />
         <Stat label={w.data.source === 'notifications' ? 'Session EXP gained' : 'Session EXP (net)'} value={startedAt === null ? '—' : gained.toLocaleString('en-US')} />
         <Stat label={w.data.source === 'status-bar' ? 'To level (est.)' : 'To level'} value={eta === null ? '—' : formatDuration(eta, true)} />
-        <Stat label="Tracking" value={startedAt !== null ? formatDuration(now - startedAt, true) : '—'} />
+        <Stat label={embedded ? 'Training time' : 'Tracking'} value={embedded && trainingMs !== undefined ?
+          formatDuration(trainingMs, true) : startedAt !== null ? formatDuration(now - startedAt, true) : '—'} />
       </div>
       <figure className="exp-rate-graph">
-        <figcaption>EXP/min - last 10 minutes</figcaption>
-        <svg viewBox="0 0 400 116" role="img" aria-label="EXP per minute over the last ten minutes, sampled every second">
-          <title>Trailing one-minute EXP rate, one point per second. Negative values indicate net EXP loss.</title>
-          {[14, 53, 92].map(y => <line key={y} x1="42" x2="392" y1={y} y2={y} className="graph-grid" />)}
-          <line x1="42" x2="392" y1={graphY(0)} y2={graphY(0)} className="graph-zero" />
+        <figcaption>EXP/min{mesoSamples && <> · <span className="graph-meso-label">Mesos/min</span></>} - last 10 minutes</figcaption>
+        <svg viewBox="0 0 400 116" role="img" aria-label={mesoSamples
+          ? 'EXP and mesos per minute over the last ten minutes, sampled every second'
+          : 'EXP per minute over the last ten minutes, sampled every second'}>
+          <title>{mesoSamples ? 'Trailing one-minute rates. EXP uses the left axis; mesos uses the blue right axis.' :
+            'Trailing one-minute EXP rate, one point per second. Negative values indicate net EXP loss.'}</title>
+          {[14, 53, 92].map(y => <line key={y} x1="42" x2={graphRight} y1={y} y2={y} className="graph-grid" />)}
+          <line x1="42" x2={graphRight} y1={graphY(0)} y2={graphY(0)} className="graph-zero" />
           <text x="38" y="18" textAnchor="end">{formatNumber(high)}</text>
           <text x="38" y="96" textAnchor="end">{formatNumber(low)}</text>
+          {mesoSamples && mesoValues.length > 0 && <>
+            <line x1="42" x2={graphRight} y1={mesoY(0)} y2={mesoY(0)} className="graph-meso-zero" />
+            <text x="354" y="18" className="graph-meso-label">{formatNumber(mesoHigh)}</text>
+            <text x="354" y="96" className="graph-meso-label">{formatNumber(mesoLow)}</text>
+          </>}
           <text x="42" y="111">-10m</text>
-          <text x="217" y="111" textAnchor="middle">-5m</text>
-          <text x="392" y="111" textAnchor="end">Now</text>
-          <path d={path} className="graph-line" />
-          {!values.length && <text x="217" y="55" textAnchor="middle">Waiting for EXP readings</text>}
+          <text x={(42 + graphRight) / 2} y="111" textAnchor="middle">-5m</text>
+          <text x={graphRight} y="111" textAnchor="end">Now</text>
+          <path d={path(history, graphY)} className="graph-line" />
+          {mesoSamples && <path d={path(mesoHistory, mesoY)} className="graph-line graph-meso-line" />}
+          {!values.length && !mesoValues.length && <text x={(42 + graphRight) / 2} y="55" textAnchor="middle">Waiting for readings</text>}
         </svg>
       </figure>
       {migrated && <p className="hint">Old percentage history was cleared; enter a points baseline.</p>}
@@ -99,27 +121,21 @@ export function MesoWidget({ w, dispatch, now, potionStatus, embedded = false, c
   const { samples } = w.data;
   const first = samples[0];
   const last = samples.at(-1);
-  const automatic = w.data.trackingStartedAt !== null;
-  const lootValue = w.data.loot.reduce((sum, item) => sum + item.quantity * (item.unitValue ?? 0), 0);
-  const gained = automatic ? w.data.pickups + lootValue : first && last ? last.value - first.value : 0;
-  const elapsed = automatic ? now - w.data.trackingStartedAt! : first ? now - first.t : 0;
-  const rate = automatic ? elapsed > 0 ? gained * 3600000 / elapsed : null : ratePerHour(samples);
+  const gained = first && last ? last.value - first.value : 0;
+  const rate = rollingPerMinute(samples, Math.max(now, last?.t ?? now), 60_000);
   const goal = w.config.goal;
-  const eta = goal > 0 && last ? etaMs(goal - last.value, rate) : null;
+  const eta = goal > 0 && last ? etaMs(goal - last.value, rate === null ? null : rate * 60) : null;
   const used = usedRecoveryItems(w.data.potionUses, w.config.potions);
 
   return (
     <div className="widget-body">
-      <div className="big">{automatic ? formatNumber(gained) : last ? formatNumber(last.value) : '—'}</div>
+      <div className="big">{last ? formatNumber(last.value) : '—'}</div>
       <div className="stats">
-        <Stat label="Mesos/hr" value={rate === null ? '—' : formatNumber(rate)} className={rate !== null && rate < 0 ? 'bad' : ''} />
-        <Stat label="Gained (incl. loot)" value={automatic || first ? formatNumber(gained) : '—'} className={gained < 0 ? 'bad' : ''} />
-        <Stat label="Tracking" value={automatic || first ? formatDuration(elapsed, true) : '—'} />
-        {automatic && <><Stat label="Meso pickups" value={formatNumber(w.data.pickups)} /><Stat label="Loot value (est.)" value={formatNumber(lootValue)} /></>}
+        <Stat label="Mesos/min" value={rate === null ? '—' : formatNumber(rate)} className={rate !== null && rate < 0 ? 'bad' : ''} />
+        <Stat label="Session mesos (net)" value={first ? formatNumber(gained) : '—'} className={gained < 0 ? 'bad' : ''} />
         <Stat label="Potion cost (est.)" value={formatNumber(w.data.potionCosts)} className="bad" />
         {w.data.unidentifiedRecoveries > 0 && <Stat label="Unidentified recoveries" value={formatNumber(w.data.unidentifiedRecoveries)} />}
-        <Stat label="Farming net (est.)" value={automatic || first ? formatNumber(gained - w.data.potionCosts) : '—'} />
-        {!automatic && goal > 0 && <Stat label="Goal ETA" value={last && last.value >= goal ? 'Reached!' : eta === null ? '—' : formatDuration(eta, true)} />}
+        {goal > 0 && <Stat label="Goal ETA" value={last && last.value >= goal ? 'Reached!' : eta === null ? '—' : formatDuration(eta, true)} />}
       </div>
       {used.length > 0 && <div className="training-used" aria-label="Estimated recovery items used">
         {used.map(({ itemId, count }) => {
@@ -130,8 +146,6 @@ export function MesoWidget({ w, dispatch, now, potionStatus, embedded = false, c
           </span>;
         })}
       </div>}
-      {w.data.loot.some(item => item.unitValue === null) && <p className="hint">Unvalued loot excluded. Set prices in Settings.</p>}
-      {automatic && <p className="hint">Retained previous notification totals. Automatic meso/loot tracking is currently disabled.</p>}
       <PotionSelection selected={w.config.selectedPotions} onChange={selectedPotions =>
         dispatch({ type: 'widget/config', id: w.id, config: { selectedPotions } })} />
       {embedded && potionStatus?.message.startsWith('Automatic recovery tracking failed:') &&
@@ -139,22 +153,13 @@ export function MesoWidget({ w, dispatch, now, potionStatus, embedded = false, c
       <button className="ghost" onClick={() => window.mscw.openControl(controlId ?? w.id)}>Configure recovery tracking</button>
       {!embedded && <p className="hint">{w.config.selectedPotions.hp === null && w.config.selectedPotions.mp === null ? 'No potions selected; potion tracking disabled.' :
         potionStatus?.message ?? 'Waiting for game capture; recovery tracking starts automatically.'}</p>}
-      {!automatic && goal > 0 && last && (
+      {goal > 0 && last && (
         <div className="bar">
           <div className="bar-fill" style={{ width: `${Math.min(100, (last.value / goal) * 100)}%` }} />
         </div>
       )}
-      {!automatic && <EntryInput
-        placeholder="Current mesos (e.g. 1.25m)"
-        onSubmit={(v) => {
-          const n = parseAmount(v);
-          if (n === null) return false;
-          dispatch({ type: 'rate/sample', id: w.id, value: n, at: Date.now() });
-          return true;
-        }}
-      />}
       {!embedded && <div className="row">
-        <span className="hint">{automatic ? 'Automatic notification gains' : `${samples.length} samples`}</span>
+        <span className="hint">{samples.length} wallet readings</span>
         <button className="ghost" onClick={() => dispatch({ type: 'rate/reset', id: w.id })}>
           Reset
         </button>

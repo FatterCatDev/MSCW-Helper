@@ -39,7 +39,7 @@ export interface RateSample {
 }
 
 export interface WidgetDataMap {
-  training: Record<string, never>;
+  training: { elapsedMs: number; runningSince: number | null };
   exp: {
     unit: 'points';
     samples: RateSample[];
@@ -93,6 +93,7 @@ export interface LayoutProfile {
   id: string;
   name: string;
   placements: Record<string, Placement>;
+  safeSummaryPosition?: { x: number; y: number };
 }
 
 export const HOTKEY_ACTIONS = ['toggleOverlay', 'toggleEdit', 'toggleClickThrough', 'openControl', 'nextProfile'] as const;
@@ -139,6 +140,19 @@ export interface GameTrackingStatus {
   message: string;
   resolution?: { width: number; height: number };
   reader?: 'calibrating' | 'font';
+}
+
+export interface MapStatus {
+  state: 'searching' | 'missing' | 'reading' | 'unknown' | 'safe' | 'unsafe';
+  message: string;
+  name?: string;
+  street?: string;
+  source?: 'shop';
+}
+
+export interface InventoryStatus {
+  state: 'missing' | 'unreadable' | 'reading' | 'open' | 'stopped';
+  message: string;
 }
 
 export interface GameAssetImport {
@@ -213,6 +227,8 @@ export interface RuntimeState {
   displays: { id: number; label: string; primary: boolean }[];
   potionTracking: Record<string, PotionStatus>;
   gameTracking: GameTrackingStatus;
+  map: MapStatus;
+  inventory: InventoryStatus;
 }
 
 export interface AppState extends PersistedState {

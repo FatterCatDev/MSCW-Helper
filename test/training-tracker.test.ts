@@ -63,6 +63,7 @@ test('training reset clears both EXP and potion totals but preserves item select
   assert.ok(exp?.type === 'exp' && meso?.type === 'meso');
   assert.deepEqual(exp.data, defaultData('exp'));
   assert.deepEqual(meso.data, defaultData('meso'));
+  assert.equal(meso.data.potionCosts, 0);
   assert.equal(meso.config.goal, 1000);
   assert.deepEqual(meso.config.potions, prices);
   assert.deepEqual(meso.config.selectedPotions, { hp: null, mp: 2010005 });

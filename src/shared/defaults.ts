@@ -64,7 +64,7 @@ export function defaultConfig<T extends WidgetType>(type: T): WidgetConfigMap[T]
 
 export function defaultData<T extends WidgetType>(type: T): WidgetDataMap[T] {
   const data: WidgetDataMap = {
-    training: {},
+    training: { elapsedMs: 0, runningSince: null },
     exp: { unit: 'points', samples: [], current: null, required: 0, level: 1, gained: 0, startedAt: null, migrated: false, source: 'manual' },
     meso: { samples: [], potionCosts: 0, potionUses: {}, pickups: 0, loot: [], trackingStartedAt: null,
       recoveryEvents: [], unidentifiedRecoveries: 0 },
@@ -205,6 +205,10 @@ export function normalizeState(raw: unknown): PersistedState {
           data: { ...defaultData('exp'), migrated: true } };
       }
       const widget = widgets[id];
+      if (widget?.type === 'training') {
+        const data = isObj(w.data) ? w.data : {};
+        widget.data = { elapsedMs: Math.round(num(data.elapsedMs, 0, 0)), runningSince: null };
+      }
       if (widget?.type === 'meso') {
         const data = isObj(w.data) ? w.data : {};
         const uses = isObj(data.potionUses) ? data.potionUses : {};
@@ -251,7 +255,12 @@ export function normalizeState(raw: unknown): PersistedState {
           placements[wid] = clampPlacement(pl as Partial<Placement>, defaultPlacement(w.type, order.indexOf(wid)));
         }
       }
-      profiles.push({ id: p.id, name: typeof p.name === 'string' ? p.name : 'Layout', placements });
+      const position = isObj(p.safeSummaryPosition) ? p.safeSummaryPosition : null;
+      const safeSummaryPosition = position && typeof position.x === 'number' && Number.isFinite(position.x) &&
+        typeof position.y === 'number' && Number.isFinite(position.y) ?
+        { x: num(position.x, 0, -5000, 20000), y: num(position.y, 0, -5000, 20000) } : undefined;
+      profiles.push({ id: p.id, name: typeof p.name === 'string' ? p.name : 'Layout', placements,
+        ...(safeSummaryPosition ? { safeSummaryPosition } : {}) });
     }
   }
   if (profiles.length === 0) {

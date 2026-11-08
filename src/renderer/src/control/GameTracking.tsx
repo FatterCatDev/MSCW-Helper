@@ -43,7 +43,7 @@ export function GameTrackingSettings({ state, dispatch }: { state: AppState; dis
       Reader: {status.reader === 'font' ? 'Bitmap font, every captured frame' : 'Waiting for recognizable status digits'}.</p>
     <p className="hint">Reads the bottom status bar: character level, EXP points and percentage. Select the numeric fields without labels;
       HP/MP current/max fields feed recovery tracking in Training Tracker. The first confirmed reading sets an EXP baseline.
-      Automatic meso/loot tracking is disabled. ETA uses an estimated requirement from points/percentage, not an API-verified table.</p>
+      Open the inventory to track mesos; automatic loot tracking is unavailable. ETA uses an estimated requirement from points/percentage, not an API-verified table.</p>
     <button disabled={busy || status.running} onClick={() => void run(async () => {
       const windows = await window.mscw.capturePreviews();
       setPreviews(windows);

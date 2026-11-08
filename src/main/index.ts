@@ -17,7 +17,11 @@ import { watchGameWindow } from './game-window-lifecycle.ts';
 import { RecoveryLifecycle } from './recovery-lifecycle.ts';
 import { usedRecoveryItems } from '../shared/recovery.ts';
 import { NPC_RECOVERY_ITEMS } from '../shared/npc-recovery-prices.ts';
-import { resetSessionTimers } from '../shared/session-lifecycle.ts';
+import { resetSessionPotions, resetSessionTimers } from '../shared/session-lifecycle.ts';
+import { MapTracking } from './map-tracking.ts';
+import { reconcileTrainingTime } from '../shared/training-time.ts';
+import { clearWallets, InventoryTracking, walletTick } from '../shared/inventory-tracking.ts';
+import type { InventoryReading } from '../shared/inventory.ts';
 
 const IMAGE_NAME_RE = /^[0-9a-f-]{36}\.(png|jpe?g|gif|webp|bmp)$/i;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -46,12 +50,16 @@ let importingGameAssets = false;
 let potionCapture: PotionCapture;
 let recoveryLifecycle: RecoveryLifecycle;
 let gameTracking: GameTracking;
+let mapTracking: MapTracking;
 let captureWindow: BrowserWindow | null = null;
 let captureConfig: GameTrackingConfig | null = null;
 let stopGameWindowWatch: (() => void) | null = null;
+const inventoryTracking = new InventoryTracking();
 const runtime: RuntimeState = { debugMode: false, debugLogs: [], detectedPotions: [],
   initializing: true, editMode: false, hotkeyErrors: {}, displays: [], potionTracking: {},
-  gameTracking: { running: false, fps: 0, frames: 0, message: 'Automatic tracking stopped.' } };
+  gameTracking: { running: false, fps: 0, frames: 0, message: 'Automatic tracking stopped.' },
+  map: { state: 'searching', message: 'Looking for the minimap.' },
+  inventory: { state: 'missing', message: 'Open your inventory to track mesos.' } };
 
 function fullState(): AppState {
   return { ...store.get(), runtime };
@@ -97,6 +105,11 @@ function broadcast(): void {
 function dispatch(action: Action): void {
   const prev = store.get();
   const training = action.type === 'training/reset' ? prev.widgets[action.id] : undefined;
+  if ((training?.type === 'training' && training.config.mesoId === prev.settings.gameTracking.mesoWidgetId) ||
+      (action.type === 'rate/reset' && action.id === prev.settings.gameTracking.mesoWidgetId)) {
+    inventoryTracking.reset(Date.now());
+    runtime.inventory = { state: 'missing', message: 'Open your inventory to track mesos.' };
+  }
   const resetActiveExp = training?.type === 'training' && runtime.gameTracking.running &&
     prev.settings.gameTracking.expWidgetId === training.config.expId;
   if (action.type === 'rate/reset' && runtime.gameTracking.running &&
@@ -105,6 +118,8 @@ function dispatch(action: Action): void {
   if (resetActiveExp && training?.type === 'training') {
     next = reducer(next, { type: 'exp/start', id: training.config.expId });
   }
+  if (action.type === 'training/reset') next = reconcileTrainingTime(next,
+    runtime.gameTracking.running && runtime.map.state === 'unsafe' ? next.settings.gameTracking.expWidgetId : null, Date.now());
   if (action.type === 'settings/set' && action.patch.gameTracking) {
     const config = next.settings.gameTracking;
     const meso = next.widgets[config.mesoWidgetId];
@@ -532,6 +547,39 @@ function registerIpc(): void {
   ipcMain.on(IPC.captureFrame, (e, image: unknown, width: unknown, height: unknown) => {
     if (captureWindow && e.sender === captureWindow.webContents) gameTracking.frame(image, width, height);
   });
+  ipcMain.on(IPC.captureMap, (e, image: unknown, kind: unknown) => {
+    if (captureWindow && e.sender === captureWindow.webContents && captureConfig)
+      mapTracking.frame(image, captureConfig.apiVersion, kind);
+  });
+  ipcMain.on(IPC.captureInventory, (e, input: unknown, capturedAt: unknown) => {
+    if (!captureWindow || e.sender !== captureWindow.webContents || !captureConfig || !runtime.gameTracking.running) return;
+    if (typeof capturedAt !== 'number' || !Number.isSafeInteger(capturedAt) || capturedAt > Date.now() ||
+        typeof input !== 'object' || input === null || !('state' in input)) {
+      console.error('[inventory] Invalid capture reading.');
+      return;
+    }
+    const reading = input as InventoryReading;
+    if (!['missing', 'unreadable', 'read'].includes(reading.state) ||
+        (reading.state === 'read' && (!Number.isSafeInteger(reading.value) || reading.value! < 0))) {
+      console.error('[inventory] Invalid capture reading.');
+      return;
+    }
+    const value = inventoryTracking.frame(reading, capturedAt);
+    const widget = store.get().widgets[captureConfig.mesoWidgetId];
+    const hasBalance = widget?.type === 'meso' && widget.data.samples.length > 0;
+    const status = reading.state === 'missing' ? { state: 'missing' as const,
+      message: hasBalance ? 'Inventory closed. Last balance retained.' : 'Open your inventory to track mesos.' } :
+      reading.state === 'unreadable' ? { state: 'unreadable' as const,
+        message: 'Inventory balance could not be read; last balance retained.' } :
+      value === null ? { state: 'reading' as const, message: 'Confirming inventory balance.' } :
+        { state: 'open' as const, message: 'Tracking mesos while inventory is open.' };
+    const changed = status.state !== runtime.inventory.state || status.message !== runtime.inventory.message;
+    runtime.inventory = status;
+    if (value !== null && widget?.type === 'meso' && widget.data.samples.at(-1)?.value !== value) {
+      dispatch({ type: 'rate/sample', id: widget.id, value,
+        at: Math.max(Date.now(), (widget.data.samples.at(-1)?.t ?? -1) + 1) });
+    } else if (changed) broadcast();
+  });
   ipcMain.on(IPC.captureError, (e, message: unknown) => {
     if (captureWindow && e.sender === captureWindow.webContents && typeof message === 'string') {
       console.error('[game-tracking] capture failed', message);
@@ -615,7 +663,18 @@ function registerIpc(): void {
 function start(): void {
   app.setAppUserModelId('com.mscwhelper.app');
   store = new Store(join(app.getPath('userData'), 'mscw-helper.json'));
-  store.set(resetSessionTimers(store.get(), Date.now()));
+  store.set(resetSessionTimers(resetSessionPotions(clearWallets(store.get())), Date.now()));
+  const walletTimer = setInterval(() => {
+    const action = walletTick(store.get(), runtime.gameTracking.running, Date.now());
+    if (action) dispatch(action);
+  }, 1000);
+  const syncTrainingTime = (): void => {
+    const state = store.get();
+    const next = reconcileTrainingTime(state, runtime.gameTracking.running && runtime.map.state === 'unsafe'
+      ? state.settings.gameTracking.expWidgetId : null, Date.now());
+    if (next !== state) store.set(next);
+  };
+  mapTracking = new MapTracking(status => { runtime.map = status; syncTrainingTime(); broadcast(); });
   potionCapture = new PotionCapture(dispatch, (id, status) => {
     if (runtime.debugMode && runtime.potionTracking[id]?.message !== status.message) console.info('[potions]', status.message);
     runtime.potionTracking[id] = status;
@@ -628,7 +687,16 @@ function start(): void {
     broadcast();
   });
   gameTracking = new GameTracking(dispatch, status => {
+    if ((!status.running && runtime.gameTracking.running) ||
+        (status.running && status.frames > 0 && status.fps === 0 && status.message.startsWith('No fresh game frames')))
+      mapTracking.reset();
+    if ((!status.running && runtime.gameTracking.running) ||
+        (status.running && status.frames > 0 && status.fps === 0 && status.message.startsWith('No fresh game frames'))) {
+      inventoryTracking.reset(Date.now());
+      runtime.inventory = { state: 'stopped', message: 'Game capture paused. Last meso balance retained.' };
+    }
     runtime.gameTracking = status;
+    syncTrainingTime();
     recoveryLifecycle.reconcile(store.get(), status.running);
     broadcast();
   },
@@ -694,11 +762,13 @@ function start(): void {
 
   app.on('before-quit', () => {
     quitting = true;
+    clearInterval(walletTimer);
     stopGameWindowWatch?.();
     stopGameWindowWatch = null;
     potionCapture.dispose();
     gameTracking.dispose();
-    store.set(resetSessionTimers(store.get(), null));
+    mapTracking.dispose();
+    store.set(resetSessionTimers(resetSessionPotions(clearWallets(store.get())), null));
     store.flush();
   });
   app.on('will-quit', () => globalShortcut.unregisterAll());

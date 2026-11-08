@@ -14,14 +14,14 @@ The executables are unsigned, so Windows may display a publisher warning.
 Build output in `release\` is ignored by Git and must be distributed separately.
 
 Automatic EXP uses the persistent bottom status-bar numbers, not notifications.
-Automatic meso/loot tracking is disabled while EXP recognition is developed.
-Manual tracking remains available; OCR is experimental.
+Automatic meso tracking reads the balance in the open inventory. Automatic loot
+tracking is not available; screen recognition is experimental.
 
 ## Widgets
 
 | Widget | What it does |
 | --- | --- |
-| Training Tracker | EXP readings, rates and graph; manual wallet tracking, potion expenses and used-item counts. Automatic meso/loot tracking is currently disabled. |
+| Training Tracker | EXP readings, rates and graph; inventory wallet balance and session change, potion expenses and used-item counts. |
 | Session Timer | Starts automatically on app launch and resets on shutdown; manual start, pause and reset controls remain available |
 | Buff / Cooldown Timers | Click (or press a global hotkey) to start; warning pulse + beep; optional auto-repeat |
 | Boss / Event Timers | Respawn countdowns (“Killed” button) or daily scheduled times |
@@ -42,6 +42,52 @@ You can add multiple widgets of each type.
 
 All hotkeys can be changed in **Settings**. Buff timers can have their own global hotkeys. Note that a global hotkey is captured by MSCW Helper, so the game won't receive that key combination.
 
+### Minimap and safe-area summary
+
+After capture starts, the overlay looks for the expanded minimap and reads its
+region and map name locally. If the name panel cannot be found, it shows only
+an instruction to click the minimap **+** button. When a town with no listed
+monsters is identified, the overlay shows a safe-area summary and the Session
+Timer instead of the other widgets; other maps show the normal widgets. Unreadable names, ambiguous
+results and API failures show an unknown-safety warning instead of assuming
+the map is safe. When capture is stopped, normal widgets remain available.
+Shop interiors with a compact minimap header are treated as safe when the
+header explicitly identifies a shop or store; other compact or unreadable
+headers still prompt the player to expand the minimap.
+While the safe-area summary is visible, use **Edit layout** (`Ctrl+Shift+F2`)
+to drag it. Its position is saved separately in each layout.
+
+The name is searched using MapleStory.io's selected GMS data version; no
+screenshot is uploaded. Map safety is an estimate based on that version, not a
+guarantee that the map is safe in MSCW. Exact map and region names are required;
+conflicting matching map records remain unknown. The panel detector is tuned to
+the supplied minimap appearance and may not recognize other UI scales or themes.
+The summary shows the active Training Tracker's accumulated training time.
+Training time runs only while capture is active and the map is identified as
+unsafe; it pauses in safe areas and while map safety is unknown or being read.
+Resetting the Training Tracker resets this time; the independent Session Timer
+continues according to its own controls. The summary also shows session EXP and
+the wallet change since the first confirmed inventory reading.
+
+### Inventory mesos
+
+Open the item inventory after capture starts to establish the meso baseline.
+The tracker looks for the inventory title and reads the balance locally, requiring
+two matching frames before updating. It retains the last confirmed balance when
+the inventory is closed, obscured or unreadable; reopen it to resume updates.
+While capture is running, the last confirmed balance is sampled every second.
+The Training Tracker shows the trailing one-minute meso rate and a blue line on
+the ten-minute graph, with mesos scaled on the right and EXP on the left. When
+inventory is closed, the graph holds the last balance until it can be read again.
+The balance and session change reset with **Reset Tracker** and when the app
+restarts, not when capture stops. **Reset Tracker** also clears estimated potion
+cost and recovery-item counts. Estimated potion cost is displayed separately:
+wallet change already includes purchases and is not reduced by that estimate.
+Potion counts, estimated costs and recovery events also reset when the app shuts
+down or starts a new session; selected recovery items and prices are retained.
+The bitmap reader is tuned to the supplied inventory appearance and scales;
+other UI scales, image smoothing or overlapping windows can prevent a reading.
+
 ### Automatic game-window EXP tracking
 
 On launch, select the game in **Initialization** and click **Start**. The saved
@@ -60,7 +106,7 @@ To adjust tracking afterward:
 4. Choose **Character level digits**, select only the digits (for example `41`,
    excluding `LV.` and the character name), and save the level region.
 5. Click **Start automatic tracking**. Start resets only EXP; Stop retains its
-   totals. Meso/loot data is neither reset nor updated by automatic EXP tracking.
+   totals and the last confirmed meso balance.
 
 Defaults are based on the supplied 2560x1440 video. Old notification crops
 migrate to the new defaults; adjust both regions for different resolutions/UI

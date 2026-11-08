@@ -22,6 +22,8 @@ export const IPC = {
   stopGameTracking: 'game-tracking:stop',
   captureConfig: 'capture:config',
   captureFrame: 'capture:frame',
+  captureMap: 'capture:map',
+  captureInventory: 'capture:inventory',
   captureError: 'capture:error',
   quit: 'app:quit'
 } as const;
@@ -54,6 +56,8 @@ export interface MscwApi {
   stopGameTracking(): Promise<void>;
   captureConfig(): Promise<GameTrackingConfig>;
   captureFrame(image: string, width?: number, height?: number): void;
+  captureMap(image: string | null, kind?: 'expanded' | 'compact'): void;
+  captureInventory(reading: import('./inventory.ts').InventoryReading, capturedAt: number): void;
   captureError(message: string): void;
   quit(): void;
 }

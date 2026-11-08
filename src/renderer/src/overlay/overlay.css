@@ -12,6 +12,21 @@ body.overlay-body,
   height: 100vh;
 }
 
+.map-notice {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 10px 12px;
+  background: rgba(16, 18, 24, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.safe-summary strong { display: block; color: var(--good); font-size: 15px; }
+.safe-summary-rnd .safe-summary { position: static; transform: none; width: 100%; max-width: none; }
+.safe-summary-rnd.editing .safe-summary { border: 1px dashed var(--accent); cursor: move; }
+
 .capture-fps {
   position: absolute;
   bottom: 12px;
@@ -197,6 +212,10 @@ body.overlay-body,
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
+
+.exp-rate-graph .graph-meso-line { stroke: #4aa9ff; }
+.exp-rate-graph .graph-meso-zero { stroke: rgba(74, 169, 255, 0.45); stroke-dasharray: 3 3; }
+.exp-rate-graph .graph-meso-label { color: #4aa9ff; fill: #4aa9ff; }
 
 .widget-body {
   display: flex;
