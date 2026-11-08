@@ -1,138 +1,83 @@
-import { type NativeImage } from 'electron';
-import { dirname, join } from 'node:path';
-import { createWorker, OEM, PSM, type Worker } from 'tesseract.js';
+import type { NativeImage } from 'electron';
 import type { Action } from '../shared/reducer.ts';
-import type { CapturePreview, PotionStatus, PotionTracker } from '../shared/types.ts';
-import { emptyCountState, isPotionTracker, observeCount, type CountState } from '../shared/potions.ts';
-import { listGameWindows, windowPreviews } from './window-capture.ts';
+import type { PotionStatus, PotionTracker, Vitals } from '../shared/types.ts';
+import { BitmapFont, EXP_FONT, binarizeStatus, statusGrid } from '../shared/status-font.ts';
+import { classifyRecovery, parseVitalText } from '../shared/recovery.ts';
+import { NPC_RECOVERY_ITEMS } from '../shared/npc-recovery-prices.ts';
 
-async function captureWindows(): Promise<Electron.DesktopCapturerSource[]> {
-  const sources = await listGameWindows();
-  if (!sources.length) throw new Error('No game window capture sources are available.');
-  return sources;
-}
+const reader = new BitmapFont(EXP_FONT);
+interface ActiveRecovery { id: string; prices: PotionTracker[]; selectedPotionIds: number[]; previous: Vitals | null; lastAt: number }
 
-export async function capturePreviews(): Promise<CapturePreview[]> {
-  return windowPreviews();
-}
-
-function cropCount(image: NativeImage, potion: PotionTracker): Buffer {
-  if (image.isEmpty()) throw new Error('Screen capture returned an empty image.');
-  const size = image.getSize();
-  const x = Math.floor(potion.region.x * size.width);
-  const y = Math.floor(potion.region.y * size.height);
-  const width = Math.min(size.width - x, Math.round(potion.region.width * size.width));
-  const height = Math.min(size.height - y, Math.round(potion.region.height * size.height));
-  if (width < 4 || height < 4 || width > 500 || height > 200) {
-    throw new Error('Select only the potion quantity digits (between 4x4 and 500x200 screen pixels).');
-  }
-  return image.crop({ x, y, width, height }).resize({ width: width * 4, height: height * 4, quality: 'best' }).toPNG();
+export function readVitals(frame: NativeImage): Vitals | null {
+  if (frame.isEmpty() || frame.getSize().width !== 1200 || frame.getSize().height < 640) return null;
+  const fields = [320, 480].map(top => {
+    const crop = frame.crop({ x: 0, y: top, width: 1200, height: 160 });
+    const grid = statusGrid(binarizeStatus(crop.toBitmap(), 1200, 160, false), 1200, 160);
+    const text = grid && reader.read(grid);
+    return text ? parseVitalText(text) : null;
+  });
+  const hp = fields[0], mp = fields[1];
+  return hp && mp ? { hp: hp.current, maxHp: hp.max, mp: mp.current, maxMp: mp.max } : null;
 }
 
 export class PotionCapture {
-  private worker: Worker | null = null;
-  private active: { id: string; potions: PotionTracker[]; counts: Map<string, CountState> } | null = null;
-  private initializing = false;
-  private reading = false;
-  private disposed = false;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private active = new Map<string, ActiveRecovery>();
   private dispatch: (action: Action) => void;
   private status: (id: string, status: PotionStatus) => void;
-
   constructor(dispatch: (action: Action) => void, status: (id: string, status: PotionStatus) => void) {
-    this.dispatch = dispatch;
-    this.status = status;
+    this.dispatch = dispatch; this.status = status;
   }
 
-  async start(id: string, potions: PotionTracker[]): Promise<void> {
-    if (this.disposed) throw new Error('MSCW Helper is shutting down.');
-    if (this.active || this.initializing || this.reading) throw new Error('Stop the existing potion detector and let its current reading finish before starting another.');
-    if (!potions.length || potions.length > 8 || !potions.every(isPotionTracker) ||
-        new Set(potions.map(p => p.id)).size !== potions.length) {
-      throw new Error('Configure 1-8 potions with a purchase cost and screen region first.');
+  start(id: string, prices: PotionTracker[], selectedPotionIds: number[]): void {
+    if (this.active.has(id)) throw new Error('Stop this recovery tracker first.');
+    if (!selectedPotionIds.length || selectedPotionIds.some(id => !Number.isSafeInteger(id) || !NPC_RECOVERY_ITEMS[id])) {
+      throw new Error('Choose the potions you use in the Tracker widget. Blank selection disables potion tracking.');
     }
-    for (let i = 0; i < potions.length; i++) {
-      for (let j = i + 1; j < potions.length; j++) {
-        const a = potions[i]!;
-        const b = potions[j]!;
-        if (a.sourceId === b.sourceId && a.region.x < b.region.x + b.region.width &&
-            b.region.x < a.region.x + a.region.width && a.region.y < b.region.y + b.region.height &&
-            b.region.y < a.region.y + a.region.height) {
-          throw new Error('Potion count regions must not overlap; this could charge the same use twice.');
-        }
+    this.active.set(id, { id, prices: structuredClone(prices),
+      selectedPotionIds: [...selectedPotionIds], previous: null, lastAt: 0 });
+    this.status(id, { running: true, counts: {}, message: 'Waiting for readable HP and MP numbers; first read sets a baseline.' });
+  }
+
+  frame(frame: NativeImage, at = Date.now()): void {
+    if (!this.active.size) return;
+    const current = readVitals(frame);
+    for (const active of this.active.values()) this.processFrame(active, current, at);
+  }
+
+  private processFrame(active: ActiveRecovery, current: Vitals | null, at: number): void {
+    if (!current) {
+      if (active.previous) this.status(active.id, { running: true, counts: {}, message: 'HP/MP unreadable; baseline cleared, no charge.' });
+      active.previous = null; active.lastAt = at;
+      return;
+    }
+    const previous = at - active.lastAt > 1000 ? null : active.previous;
+    active.previous = current; active.lastAt = at;
+    const results = previous ? classifyRecovery(previous, current, active.selectedPotionIds) : [];
+    if (results.length) {
+      for (const result of results) {
+      const local = result.itemId === null ? null : NPC_RECOVERY_ITEMS[result.itemId];
+      const override = active.prices.find(p => p.itemId === result.itemId)?.unitCost;
+      const cost = result.itemId === null ? null : override ?? local?.npcBuyPrice ?? null;
+      this.dispatch({ type: 'recovery/event', id: active.id, event: {
+        id: globalThis.crypto.randomUUID(), at, ...result, cost
+      } });
+      this.status(active.id, { running: true, counts: {}, vitals: current,
+        message: `HP +${result.hp}, MP +${result.mp}: ${local?.name ?? 'unidentified recovery'}. ${result.reason} ${cost === null ? 'Not charged.' : `${cost} mesos estimated.`}` });
       }
-    }
-    this.initializing = true;
-    const active = { id, potions: structuredClone(potions), counts: new Map<string, CountState>() };
-    this.active = active;
-    this.status(id, { running: true, message: 'Starting local OCR...', counts: {} });
-    try {
-      if (!this.worker) {
-        this.worker = await createWorker('eng', OEM.LSTM_ONLY, {
-          langPath: join(dirname(require.resolve('@tesseract.js-data/eng')), '4.0.0'),
-          cacheMethod: 'none',
-          errorHandler: (error: unknown) => console.error('[potion-capture] OCR worker failed', error)
-        });
-        await this.worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE, tessedit_char_whitelist: '0123456789' });
-      }
-      if (this.active === active) void this.tick();
-    } catch (error) {
-      this.stop(id, error instanceof Error ? error.message : String(error));
-      throw error;
-    } finally {
-      this.initializing = false;
-      if (this.disposed) this.terminateWorker();
+    } else if (!previous || previous.hp !== current.hp || previous.mp !== current.mp) {
+      this.status(active.id, { running: true, counts: {}, vitals: current, message: previous ?
+        'Reading HP/MP; only increases within 50% of a selected item count. Max-stat changes and death establish a new baseline.' : 'HP/MP baseline established.' });
     }
   }
 
-  stop(id: string, message = 'Stopped. Starting again establishes a new baseline.'): void {
-    if (this.active?.id !== id) return;
-    this.active = null;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
-    this.status(id, { running: false, message, counts: {} });
+  stop(id: string, message = 'Recovery tracking stopped. Restart establishes a new baseline.'): void {
+    if (!this.active.delete(id)) return;
+    this.status(id, { running: false, counts: {}, message });
   }
 
-  private async tick(): Promise<void> {
-    const active = this.active;
-    if (!active || !this.worker) return;
-    this.reading = true;
-    const counts: Record<string, number> = {};
-    const messages: string[] = [];
-    try {
-      const windows = await captureWindows();
-      for (const potion of active.potions) {
-        const source = windows.find(s => s.id === potion.sourceId);
-        if (!source) throw new Error(`Game window for ${potion.name} is unavailable. Select its region again.`);
-        const image = cropCount(source.thumbnail, potion);
-        const result = await this.worker.recognize(image);
-        if (this.active !== active) return;
-        const observation = observeCount(active.counts.get(potion.id) ?? emptyCountState(), result.data.text, result.data.confidence);
-        active.counts.set(potion.id, observation.state);
-        if (observation.count !== null) counts[potion.id] = observation.count;
-        messages.push(`${potion.name}: ${observation.message}`);
-        if (observation.used) this.dispatch({ type: 'potion/used', id: active.id, potionId: potion.id, quantity: 1 });
-      }
-      if (this.active === active) this.status(active.id, { running: true, message: messages.join(' '), counts });
-    } catch (error) {
-      console.error('[potion-capture] capture failed', error);
-      if (this.active === active) this.stop(active.id, error instanceof Error ? error.message : String(error));
-    } finally {
-      this.reading = false;
-      if (this.disposed) this.terminateWorker();
-    }
-    if (this.active === active) this.timer = setTimeout(() => void this.tick(), 1500);
+  stopAll(message: string): void {
+    for (const id of this.active.keys()) this.stop(id, message);
   }
 
-  dispose(): void {
-    if (this.active) this.stop(this.active.id);
-    this.disposed = true;
-    if (!this.reading && !this.initializing) this.terminateWorker();
-  }
-
-  private terminateWorker(): void {
-    const worker = this.worker;
-    this.worker = null;
-    if (worker) void worker.terminate().catch((error: unknown) => console.error('[potion-capture] shutdown failed', error));
-  }
+  dispose(): void { this.stopAll('MSCW Helper is shutting down.'); }
 }

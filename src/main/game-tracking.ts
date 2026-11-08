@@ -50,15 +50,18 @@ export class GameTracking {
   private status: (status: GameTrackingStatus) => void;
   private startCapture: (config: GameTrackingConfig) => Promise<void>;
   private stopCapture: () => void;
+  private recoveryFrame: (frame: NativeImage) => void;
 
   constructor(
     dispatch: (action: Action) => void,
     status: (status: GameTrackingStatus) => void,
     startCapture: (config: GameTrackingConfig) => Promise<void>,
-    stopCapture: () => void
+    stopCapture: () => void,
+    recoveryFrame: (frame: NativeImage) => void = () => {}
   ) {
     this.dispatch = dispatch; this.status = status;
     this.startCapture = startCapture; this.stopCapture = stopCapture;
+    this.recoveryFrame = recoveryFrame;
   }
 
   async start(config: GameTrackingConfig): Promise<void> {
@@ -134,7 +137,9 @@ export class GameTracking {
     active.frames++;
     active.fpsFrames++;
     try {
-      this.recognize(active, nativeImage.createFromBuffer(Buffer.from(image.slice('data:image/png;base64,'.length), 'base64')));
+      const frame = nativeImage.createFromBuffer(Buffer.from(image.slice('data:image/png;base64,'.length), 'base64'));
+      this.recoveryFrame(frame);
+      this.recognize(active, frame);
     } catch (error) {
       console.error('[game-tracking] frame recognition failed', error);
       this.stop(error instanceof Error ? error.message : String(error));

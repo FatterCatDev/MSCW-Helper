@@ -9,9 +9,13 @@ import { createAppIcon } from './icon.ts';
 import { Store } from './store.ts';
 import { getGameAssets, importGameAssets } from './game-assets.ts';
 import { lookupPotion } from './items.ts';
-import { capturePreviews, PotionCapture } from './potion-capture.ts';
+import { PotionCapture } from './potion-capture.ts';
 import { GameTracking } from './game-tracking.ts';
-import { listGameWindows } from './window-capture.ts';
+import { listGameWindows, windowPreviews } from './window-capture.ts';
+import { inspect } from 'node:util';
+import { watchGameWindow } from './game-window-lifecycle.ts';
+import { RecoveryLifecycle } from './recovery-lifecycle.ts';
+import { NPC_RECOVERY_ITEMS } from '../shared/npc-recovery-prices.ts';
 
 const IMAGE_NAME_RE = /^[0-9a-f-]{36}\.(png|jpe?g|gif|webp|bmp)$/i;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -38,17 +42,53 @@ let rendererWantsIgnore = true;
 let hotkeySignature = '';
 let importingGameAssets = false;
 let potionCapture: PotionCapture;
+let recoveryLifecycle: RecoveryLifecycle;
 let gameTracking: GameTracking;
 let captureWindow: BrowserWindow | null = null;
 let captureConfig: GameTrackingConfig | null = null;
-const runtime: RuntimeState = { initializing: true, editMode: false, hotkeyErrors: {}, displays: [], potionTracking: {},
+let stopGameWindowWatch: (() => void) | null = null;
+const runtime: RuntimeState = { debugMode: false, debugLogs: [], detectedPotions: [],
+  initializing: true, editMode: false, hotkeyErrors: {}, displays: [], potionTracking: {},
   gameTracking: { running: false, fps: 0, frames: 0, message: 'Automatic tracking stopped.' } };
 
 function fullState(): AppState {
   return { ...store.get(), runtime };
 }
 
+function monitorGameWindow(sourceId: string): void {
+  const stop = watchGameWindow(sourceId, () => {
+    console.info('[game-window] Selected game window closed; shutting down MSCW Helper.');
+    app.quit();
+  });
+  stopGameWindowWatch?.();
+  stopGameWindowWatch = stop;
+}
+
+function enableDebug(): void {
+  runtime.debugMode = true;
+  for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      original(...args);
+      runtime.debugLogs.push({ time: Date.now(), level,
+        message: args.map(value => typeof value === 'string' ? value : inspect(value, { depth: 2 })).join(' ').slice(0, 2000) });
+      if (runtime.debugLogs.length > 200) runtime.debugLogs.shift();
+    };
+  }
+  console.info('[debug] Debug mode enabled. Capture images stay local.');
+}
+
 function broadcast(): void {
+  const totals = new Map<number, number>();
+  for (const widget of Object.values(store.get().widgets)) {
+    if (widget.type !== 'meso') continue;
+    for (const item of Object.values(NPC_RECOVERY_ITEMS)) {
+      const key = widget.config.potions.find(p => p.itemId === item.itemId)?.id ?? `recovery-${item.itemId}`;
+      const count = widget.data.potionUses[key] ?? 0;
+      if (count) totals.set(item.itemId, (totals.get(item.itemId) ?? 0) + count);
+    }
+  }
+  runtime.detectedPotions = [...totals].map(([itemId, count]) => ({ itemId, name: NPC_RECOVERY_ITEMS[itemId]!.name, count }));
   const state = fullState();
   for (const win of [overlay, control]) {
     if (win && !win.isDestroyed()) win.webContents.send(IPC.state, state);
@@ -56,7 +96,6 @@ function broadcast(): void {
 }
 
 function dispatch(action: Action): void {
-  if (action.type === 'rate/reset' || action.type === 'potion/reset') potionCapture.stop(action.id);
   if (action.type === 'rate/reset' && runtime.gameTracking.running &&
       store.get().settings.gameTracking.expWidgetId === action.id) gameTracking.stop();
   const prev = store.get();
@@ -72,25 +111,18 @@ function dispatch(action: Action): void {
   }
   if (next === prev) return;
   store.set(next);
-  applySideEffects(prev, next);
+  applySideEffects(prev, next, action.type === 'rate/reset' || action.type === 'potion/reset' ? action.id : undefined);
   broadcast();
 }
 
-function applySideEffects(prev: PersistedState | null, next: PersistedState): void {
+function applySideEffects(prev: PersistedState | null, next: PersistedState, resetId?: string): void {
   if (runtime.gameTracking.running && prev &&
       (prev.settings.gameTracking !== next.settings.gameTracking ||
        !next.widgets[next.settings.gameTracking.expWidgetId])) {
     gameTracking.stop('Tracking configuration changed. Start again to begin a new session.');
   }
-  for (const [id, status] of Object.entries(runtime.potionTracking)) {
-    const before = prev?.widgets[id];
-    const after = next.widgets[id];
-    if (status.running && (!after || after.type !== 'meso' ||
-        (before?.type === 'meso' && before.config.potions !== after.config.potions))) {
-      potionCapture.stop(id, 'Configuration changed. Start again to establish a new baseline.');
-    }
-    if (!after) delete runtime.potionTracking[id];
-  }
+  recoveryLifecycle.reconcile(next, runtime.gameTracking.running, resetId);
+  for (const id of Object.keys(runtime.potionTracking)) if (!next.widgets[id]) delete runtime.potionTracking[id];
   const s = next.settings;
   if (!prev || prev.settings.displayId !== s.displayId) positionOverlay();
   if (!prev || prev.settings.overlayVisible !== s.overlayVisible) updateOverlayVisibility();
@@ -166,6 +198,9 @@ function load(win: BrowserWindow, page: 'overlay' | 'control'): void {
 }
 
 function hardenWebContents(wc: WebContents): void {
+  wc.on('console-message', event => {
+    if (runtime.debugMode) console.log(`[renderer:${event.level}] ${event.message}`);
+  });
   wc.setWindowOpenHandler(() => ({ action: 'deny' }));
   wc.on('will-navigate', (e, url) => {
     const dev = process.env['ELECTRON_RENDERER_URL'];
@@ -433,12 +468,14 @@ function registerIpc(): void {
   const requireControl = (e: IpcMainInvokeEvent): void => {
     if (!control || BrowserWindow.fromWebContents(e.sender) !== control) throw new Error('Game asset access is only available from the control panel.');
   };
-  ipcMain.handle(IPC.initializeGame, async (e, sourceId: unknown) => {
+  ipcMain.handle(IPC.initializeGame, async (e, sourceId: unknown, debugMode: unknown) => {
     requireControl(e);
     if (!runtime.initializing) throw new Error('The app is already initialized.');
     if (typeof sourceId !== 'string' || !/^window:\d+:\d+$/.test(sourceId)) throw new Error('Choose a game window first.');
     const source = (await listGameWindows()).find(window => window.id === sourceId);
     if (!source || source.thumbnail.isEmpty()) throw new Error('The selected game window is unavailable. Refresh and select it again.');
+    if (debugMode !== undefined && typeof debugMode !== 'boolean') throw new Error('Debug mode must be true or false.');
+    if (debugMode === true && !runtime.debugMode) enableDebug();
     const saved = store.get().settings.gameTracking;
     const target = (type: 'exp', savedId: string): string => {
       if (store.get().widgets[savedId]?.type === type) return savedId;
@@ -455,6 +492,7 @@ function registerIpc(): void {
     dispatch({ type: 'settings/set', patch: { gameTracking: config } });
     await gameTracking.start(config);
     if (!runtime.gameTracking.running) throw new Error(runtime.gameTracking.message);
+    monitorGameWindow(sourceId);
     runtime.initializing = false;
     dispatch({ type: 'settings/set', patch: { overlayVisible: true } });
     for (const id of [config.expWidgetId]) {
@@ -476,6 +514,7 @@ function registerIpc(): void {
       throw new Error('Choose an EXP Tracker first.');
     }
     await gameTracking.start(config);
+    monitorGameWindow(config.sourceId);
   });
   ipcMain.handle(IPC.stopGameTracking, e => { requireControl(e); gameTracking.stop(); });
   ipcMain.handle(IPC.captureConfig, e => {
@@ -497,18 +536,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.capturePreviews, async (e) => {
     requireControl(e);
-    return capturePreviews();
-  });
-  ipcMain.handle(IPC.startPotions, async (e, id: unknown) => {
-    requireControl(e);
-    if (typeof id !== 'string' || store.get().widgets[id]?.type !== 'meso') throw new Error('Select a Meso Tracker.');
-    const w = store.get().widgets[id];
-    if (w?.type === 'meso') await potionCapture.start(id, w.config.potions);
-  });
-  ipcMain.handle(IPC.stopPotions, async (e, id: unknown) => {
-    requireControl(e);
-    if (typeof id !== 'string') throw new Error('A widget ID is required.');
-    potionCapture.stop(id);
+    return windowPreviews();
   });
   ipcMain.handle(IPC.pickGameData, async (e) => {
     requireControl(e);
@@ -546,7 +574,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getState, (e) => (fromOurWindow(e) ? fullState() : null));
   ipcMain.on(IPC.dispatch, (e, action: unknown) => {
     if (fromOurWindow(e) && isAction(action) &&
-        !['potion/used', 'exp/start', 'exp/status', 'tracking/start', 'tracking/gain', 'loot/value'].includes(action.type)) dispatch(action);
+        !['potion/used', 'recovery/event', 'exp/start', 'exp/status', 'tracking/start', 'tracking/gain', 'loot/value'].includes(action.type)) dispatch(action);
   });
   ipcMain.on(IPC.setEditMode, (e, on: unknown) => {
     if (fromOurWindow(e) && typeof on === 'boolean') setEditMode(on);
@@ -580,10 +608,21 @@ function start(): void {
   app.setAppUserModelId('com.mscwhelper.app');
   store = new Store(join(app.getPath('userData'), 'mscw-helper.json'));
   potionCapture = new PotionCapture(dispatch, (id, status) => {
+    if (runtime.debugMode && runtime.potionTracking[id]?.message !== status.message) console.info('[potions]', status.message);
     runtime.potionTracking[id] = status;
     broadcast();
   });
-  gameTracking = new GameTracking(dispatch, status => { runtime.gameTracking = status; broadcast(); },
+  recoveryLifecycle = new RecoveryLifecycle(potionCapture, (id, error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[potions] Automatic recovery tracking failed:', error);
+    runtime.potionTracking[id] = { running: false, counts: {}, message: `Automatic recovery tracking failed: ${message}` };
+    broadcast();
+  });
+  gameTracking = new GameTracking(dispatch, status => {
+    runtime.gameTracking = status;
+    recoveryLifecycle.reconcile(store.get(), status.running);
+    broadcast();
+  },
     async config => {
       captureConfig = config;
       const captureSession = session.fromPartition('mscw-window-capture');
@@ -618,7 +657,7 @@ function start(): void {
       const window = captureWindow;
       captureWindow = null; captureConfig = null;
       if (window && !window.isDestroyed()) window.destroy();
-    });
+    }, frame => potionCapture.frame(frame));
   imagesDir = join(app.getPath('userData'), 'images');
   mkdirSync(imagesDir, { recursive: true });
   sweepImages();
@@ -646,6 +685,8 @@ function start(): void {
 
   app.on('before-quit', () => {
     quitting = true;
+    stopGameWindowWatch?.();
+    stopGameWindowWatch = null;
     potionCapture.dispose();
     gameTracking.dispose();
     store.flush();

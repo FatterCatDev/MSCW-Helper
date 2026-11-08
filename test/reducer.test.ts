@@ -172,7 +172,10 @@ test('potion expenses accumulate at configured purchase prices without changing 
   assert.equal(widgetOfType(s, 'meso').data.potionCosts, 100);
   assert.equal(widgetOfType(s, 'meso').data.potionUses.hp, 2);
   assert.deepEqual(widgetOfType(s, 'meso').data.samples, samples);
-  assert.equal(run(s, { type: 'potion/used', id, potionId: 'hp', quantity: 20 }), s);
+  const bulk = run(s, { type: 'potion/used', id, potionId: 'hp', quantity: 20 });
+  assert.equal(widgetOfType(bulk, 'meso').data.potionCosts, 1100);
+  assert.equal(widgetOfType(bulk, 'meso').data.potionUses.hp, 22);
+  assert.equal(run(s, { type: 'potion/used', id, potionId: 'hp', quantity: 10000 }), s);
   assert.equal(run(s, { type: 'potion/used', id, potionId: 'missing', quantity: 1 }), s);
   assert.equal(widgetOfType(run(s, { type: 'potion/reset', id }), 'meso').data.potionCosts, 0);
   assert.equal(widgetOfType(run(s, { type: 'rate/reset', id }), 'meso').data.potionCosts, 0);

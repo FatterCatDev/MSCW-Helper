@@ -24,7 +24,7 @@ export interface BossEntry {
 
 export interface WidgetConfigMap {
   exp: Record<string, never>;
-  meso: { goal: number; potions: PotionTracker[] };
+  meso: { goal: number; potions: PotionTracker[]; selectedPotions: RecoveryPotionSelection };
   session: Record<string, never>;
   timers: { timers: TimerEntry[]; warnSec: number };
   boss: { entries: BossEntry[]; warnMin: number };
@@ -51,7 +51,7 @@ export interface WidgetDataMap {
     percent?: number;
   };
   meso: { samples: RateSample[]; potionCosts: number; potionUses: Record<string, number>;
-    pickups: number; loot: LootEntry[]; trackingStartedAt: number | null };
+    pickups: number; loot: LootEntry[]; trackingStartedAt: number | null; recoveryEvents: RecoveryEvent[]; unidentifiedRecoveries: number };
   session: { running: boolean; startedAt: number; accumulatedMs: number };
   timers: { endsAt: Record<string, number> };
   boss: { nextAt: Record<string, number> };
@@ -119,6 +119,8 @@ export interface LootEntry {
 export interface GameTrackingConfig {
   captureMode?: 'status-bar';
   levelRegion?: CaptureRegion;
+  hpRegion?: CaptureRegion;
+  mpRegion?: CaptureRegion;
   sourceId: string;
   windowName: string;
   region: CaptureRegion;
@@ -157,8 +159,13 @@ export interface PotionTracker {
   itemId: number;
   name: string;
   unitCost: number;
-  sourceId: string;
-  region: CaptureRegion;
+}
+
+export interface RecoveryPotionSelection { hp: number | null; mp: number | null }
+export interface Vitals { hp: number; maxHp: number; mp: number; maxMp: number }
+export interface RecoveryEvent {
+  id: string; at: number; hp: number; mp: number; candidates: number[]; reason: string;
+  itemId: number | null; cost: number | null;
 }
 
 export interface PotionItem {
@@ -166,6 +173,8 @@ export interface PotionItem {
   name: string;
   description: string;
   npcSellPrice: number | null;
+  npcBuyPrice: number | null;
+  npcPriceSource: string | null;
 }
 
 export interface CapturePreview {
@@ -178,6 +187,7 @@ export interface PotionStatus {
   running: boolean;
   message: string;
   counts: Record<string, number>;
+  vitals?: Vitals;
 }
 
 export interface PersistedState {
@@ -191,6 +201,9 @@ export interface PersistedState {
 }
 
 export interface RuntimeState {
+  debugMode: boolean;
+  debugLogs: { time: number; level: string; message: string }[];
+  detectedPotions: { name: string; itemId: number; count: number | null }[];
   initializing: boolean;
   editMode: boolean;
   /** Accelerators that failed to register, with reason. */

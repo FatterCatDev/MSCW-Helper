@@ -1,4 +1,5 @@
-import type { HotkeyAction, Placement, PersistedState, Settings, WidgetDef, WidgetType } from './types.ts';
+import type { HotkeyAction, Placement, PersistedState, RecoveryEvent, Settings, WidgetDef, WidgetType } from './types.ts';
+import { NPC_RECOVERY_ITEMS } from './npc-recovery-prices.ts';
 import { HOTKEY_ACTIONS, WIDGET_TYPES } from './types.ts';
 import { clampPlacement, createWidget, defaultData, defaultPlacement, newId } from './defaults.ts';
 import { retainRateWindow } from './time.ts';
@@ -29,6 +30,8 @@ export type Action =
   | { type: 'loot/value'; id: string; name: string; unitValue: number; itemId: number | null }
   | { type: 'potion/used'; id: string; potionId: string; quantity: number }
   | { type: 'potion/reset'; id: string }
+  | { type: 'recovery/event'; id: string; event: RecoveryEvent }
+  | { type: 'recovery/resolve'; id: string; eventId: string; itemId: number; cost: number }
   | { type: 'session/toggle'; id: string; at: number }
   | { type: 'session/reset'; id: string }
   | { type: 'timer/start'; id: string; timerId: string; at: number }
@@ -42,7 +45,7 @@ export const ACTION_TYPES: ReadonlySet<string> = new Set<Action['type']>([
   'placement/set', 'profile/create', 'profile/rename', 'profile/delete', 'profile/activate', 'profile/next',
   'settings/set', 'settings/hotkey', 'rate/sample', 'rate/reset', 'session/toggle', 'session/reset',
   'timer/start', 'timer/stop', 'boss/mark', 'boss/clear', 'notes/dailyReset',
-  'exp/sample', 'exp/status', 'exp/start', 'potion/used', 'potion/reset', 'tracking/start', 'tracking/gain', 'loot/value'
+  'exp/sample', 'exp/status', 'exp/start', 'potion/used', 'potion/reset', 'recovery/event', 'recovery/resolve', 'tracking/start', 'tracking/gain', 'loot/value'
 ]);
 
 export function isAction(v: unknown): v is Action {
@@ -239,13 +242,38 @@ export function reducer(state: PersistedState, action: Action): PersistedState {
     case 'potion/used':
       return updateWidget(state, action.id, 'meso', (m) => {
         const potion = m.config.potions.find(p => p.id === action.potionId);
-        if (!potion || !Number.isSafeInteger(action.quantity) || action.quantity !== 1 ||
+        if (!potion || !Number.isSafeInteger(action.quantity) || action.quantity < 1 || action.quantity > 9999 ||
             !finite(potion.unitCost) || potion.unitCost <= 0) return m;
-        return { ...m, data: { ...m.data, potionCosts: m.data.potionCosts + potion.unitCost,
+        return { ...m, data: { ...m.data, potionCosts: m.data.potionCosts + potion.unitCost * action.quantity,
           potionUses: { ...m.data.potionUses, [potion.id]: (m.data.potionUses[potion.id] ?? 0) + action.quantity } } };
       });
     case 'potion/reset':
-      return updateWidget(state, action.id, 'meso', m => ({ ...m, data: { ...m.data, potionCosts: 0, potionUses: {} } }));
+      return updateWidget(state, action.id, 'meso', m => ({ ...m, data: { ...m.data, potionCosts: 0, potionUses: {}, recoveryEvents: [], unidentifiedRecoveries: 0 } }));
+    case 'recovery/event':
+      return updateWidget(state, action.id, 'meso', m => {
+        const e = action.event;
+        if (!e || typeof e.id !== 'string' || m.data.recoveryEvents.some(existing => existing.id === e.id) ||
+            !finite(e.at) || !Number.isSafeInteger(e.hp) || !Number.isSafeInteger(e.mp) || e.hp < 0 || e.mp < 0 ||
+            (e.hp <= 10 && e.mp <= 10) || !Array.isArray(e.candidates) || !e.candidates.every(id => !!NPC_RECOVERY_ITEMS[id]) ||
+            typeof e.reason !== 'string' || (e.itemId !== null && !NPC_RECOVERY_ITEMS[e.itemId]) ||
+            (e.cost !== null && (!Number.isSafeInteger(e.cost) || e.cost < 0)) || (e.itemId === null && e.cost !== null)) return m;
+        const key = e.itemId === null ? null : m.config.potions.find(p => p.itemId === e.itemId)?.id ?? `recovery-${e.itemId}`;
+        return { ...m, data: { ...m.data, recoveryEvents: [...m.data.recoveryEvents, e].slice(-200),
+          unidentifiedRecoveries: m.data.unidentifiedRecoveries + Number(e.itemId === null),
+          potionCosts: m.data.potionCosts + (e.cost ?? 0),
+          potionUses: key === null ? m.data.potionUses : { ...m.data.potionUses, [key]: (m.data.potionUses[key] ?? 0) + 1 } } };
+      });
+    case 'recovery/resolve':
+      return updateWidget(state, action.id, 'meso', m => {
+        const e = m.data.recoveryEvents.find(event => event.id === action.eventId);
+        if (!e || e.cost !== null || (e.itemId !== null && e.itemId !== action.itemId) || !NPC_RECOVERY_ITEMS[action.itemId] ||
+            !Number.isSafeInteger(action.cost) || action.cost < 0) return m;
+        const key = m.config.potions.find(p => p.itemId === action.itemId)?.id ?? `recovery-${action.itemId}`;
+        return { ...m, data: { ...m.data, potionCosts: m.data.potionCosts + action.cost,
+          unidentifiedRecoveries: m.data.unidentifiedRecoveries - Number(e.itemId === null),
+          potionUses: e.itemId === null ? { ...m.data.potionUses, [key]: (m.data.potionUses[key] ?? 0) + 1 } : m.data.potionUses,
+          recoveryEvents: m.data.recoveryEvents.map(event => event.id === e.id ? { ...event, itemId: action.itemId, cost: action.cost } : event) } };
+      });
     case 'session/toggle':
       return updateWidget(state, action.id, 'session', (s) => {
         const d = s.data;

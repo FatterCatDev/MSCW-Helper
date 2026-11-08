@@ -10,7 +10,8 @@ import type {
   WidgetType
 } from './types.ts';
 import { HOTKEY_ACTIONS, WIDGET_TYPES } from './types.ts';
-import { DEFAULT_EXP_REGION, DEFAULT_LEVEL_REGION, validRegion } from './game-tracking.ts';
+import { DEFAULT_EXP_REGION, DEFAULT_LEVEL_REGION, DEFAULT_HP_REGION, DEFAULT_MP_REGION, validRegion } from './game-tracking.ts';
+import { normalizeRecoverySelection } from './recovery.ts';
 
 export const WIDGET_LABELS: Record<WidgetType, string> = {
   exp: 'EXP Tracker',
@@ -39,7 +40,7 @@ export function newId(): string {
 export function defaultConfig<T extends WidgetType>(type: T): WidgetConfigMap[T] {
   const configs: WidgetConfigMap = {
     exp: {},
-    meso: { goal: 0, potions: [] },
+    meso: { goal: 0, potions: [], selectedPotions: { hp: null, mp: null } },
     session: {},
     timers: {
       warnSec: 10,
@@ -61,7 +62,8 @@ export function defaultConfig<T extends WidgetType>(type: T): WidgetConfigMap[T]
 export function defaultData<T extends WidgetType>(type: T): WidgetDataMap[T] {
   const data: WidgetDataMap = {
     exp: { unit: 'points', samples: [], current: null, required: 0, level: 1, gained: 0, startedAt: null, migrated: false, source: 'manual' },
-    meso: { samples: [], potionCosts: 0, potionUses: {}, pickups: 0, loot: [], trackingStartedAt: null },
+    meso: { samples: [], potionCosts: 0, potionUses: {}, pickups: 0, loot: [], trackingStartedAt: null,
+      recoveryEvents: [], unidentifiedRecoveries: 0 },
     session: { running: false, startedAt: 0, accumulatedMs: 0 },
     timers: { endsAt: {} },
     boss: { nextAt: {} },
@@ -107,7 +109,7 @@ export function defaultSettings(): Settings {
     soundEnabled: true,
     launchAtLogin: false,
     gameDataPath: DEFAULT_GAME_DATA_PATH,
-    gameTracking: { captureMode: 'status-bar', levelRegion: { ...DEFAULT_LEVEL_REGION }, sourceId: '', windowName: '', region: { ...DEFAULT_EXP_REGION }, expWidgetId: '', mesoWidgetId: '',
+    gameTracking: { captureMode: 'status-bar', levelRegion: { ...DEFAULT_LEVEL_REGION }, hpRegion: { ...DEFAULT_HP_REGION }, mpRegion: { ...DEFAULT_MP_REGION }, sourceId: '', windowName: '', region: { ...DEFAULT_EXP_REGION }, expWidgetId: '', mesoWidgetId: '',
       apiVersion: '62', priceOverrides: {} }
   };
 }
@@ -145,15 +147,11 @@ function normalizePotions(raw: unknown): PotionTracker[] {
     if (!isObj(p) || typeof p.id !== 'string' || typeof p.name !== 'string' ||
         typeof p.itemId !== 'number' || !Number.isSafeInteger(p.itemId) || p.itemId <= 0 ||
         result.some(existing => existing.id === p.id)) continue;
-    const r = isObj(p.region) ? p.region : {};
     result.push({
       id: p.id, itemId: p.itemId, name: p.name,
-      unitCost: Math.round(num(p.unitCost, 0, 0, 1e9)),
-      sourceId: typeof p.sourceId === 'string' ? p.sourceId : '',
-      region: { x: num(r.x, 0, 0, 1), y: num(r.y, 0, 0, 1),
-        width: num(r.width, 0, 0, 1), height: num(r.height, 0, 0, 1) }
+      unitCost: Math.round(num(p.unitCost, 0, 0, 1e9))
     });
-    if (result.length === 8) break;
+    if (result.length === 100) break;
   }
   return result;
 }
@@ -200,6 +198,20 @@ export function normalizeState(raw: unknown): PersistedState {
         const data = isObj(w.data) ? w.data : {};
         const uses = isObj(data.potionUses) ? data.potionUses : {};
         widget.config.potions = normalizePotions(isObj(w.config) ? w.config.potions : undefined);
+        widget.config.selectedPotions = normalizeRecoverySelection(isObj(w.config) ? w.config.selectedPotions : undefined,
+          isObj(w.config) ? w.config.selectedPotionIds : undefined);
+        if ('selectedPotionIds' in widget.config) delete widget.config.selectedPotionIds;
+        if ('recovery' in widget.config) delete widget.config.recovery;
+        widget.data.unidentifiedRecoveries = Math.round(num(data.unidentifiedRecoveries, 0, 0));
+        widget.data.recoveryEvents = Array.isArray(data.recoveryEvents) ? data.recoveryEvents.filter(isObj).filter(e =>
+          typeof e.id === 'string' && typeof e.at === 'number' && Number.isFinite(e.at) &&
+          typeof e.hp === 'number' && Number.isSafeInteger(e.hp) && e.hp >= 0 &&
+          typeof e.mp === 'number' && Number.isSafeInteger(e.mp) && e.mp >= 0 &&
+          Array.isArray(e.candidates) && e.candidates.every(Number.isSafeInteger) && typeof e.reason === 'string' &&
+          (e.itemId === null || Number.isSafeInteger(e.itemId)) && (e.cost === null || typeof e.cost === 'number' && Number.isSafeInteger(e.cost) && e.cost >= 0)
+        ).slice(-200).map(e => ({ id: String(e.id), at: Number(e.at), hp: Number(e.hp), mp: Number(e.mp),
+          candidates: (e.candidates as number[]), reason: String(e.reason), itemId: e.itemId === null ? null : Number(e.itemId),
+          cost: e.cost === null ? null : Number(e.cost) })) : [];
         widget.data.potionCosts = num(data.potionCosts, 0, 0);
         widget.data.potionUses = Object.fromEntries(Object.entries(uses).filter((entry): entry is [string, number] =>
           typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0));
@@ -251,6 +263,8 @@ export function normalizeState(raw: unknown): PersistedState {
   const gameTracking: Settings['gameTracking'] = {
     captureMode: 'status-bar',
     levelRegion: validRegion(tracking.levelRegion) ? tracking.levelRegion : { ...DEFAULT_LEVEL_REGION },
+    hpRegion: validRegion(tracking.hpRegion) ? tracking.hpRegion : { ...DEFAULT_HP_REGION },
+    mpRegion: validRegion(tracking.mpRegion) ? tracking.mpRegion : { ...DEFAULT_MP_REGION },
     sourceId: typeof tracking.sourceId === 'string' ? tracking.sourceId : '',
     windowName: typeof tracking.windowName === 'string' ? tracking.windowName : '',
     region: tracking.captureMode === 'status-bar' && validRegion(tracking.region) ? tracking.region : { ...DEFAULT_EXP_REGION },

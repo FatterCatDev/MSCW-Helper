@@ -1,0 +1,74 @@
+.potion-dropdowns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.potion-dropdown summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.potion-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.potion-dropdown summary[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.potion-selected,
+.potion-options button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.potion-icon {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.potion-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(36px, 1fr));
+  gap: 4px;
+  padding: 6px 0;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.potion-options button {
+  padding: 2px;
+}
+
+.potion-options button[aria-pressed="true"],
+.potion-dropdown summary:focus-visible,
+.potion-options button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.potion-none {
+  width: 24px;
+  height: 24px;
+  border: 1px dashed var(--muted);
+  border-radius: 4px;
+}
+
+.potion-icon-error {
+  color: var(--bad);
+  font-weight: bold;
+}

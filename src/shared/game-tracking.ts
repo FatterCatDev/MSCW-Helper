@@ -5,6 +5,8 @@ export const CAPTURE_INTERVAL_MS = 1000 / MAX_CAPTURE_FPS;
 export const DEFAULT_GAIN_REGION: CaptureRegion = { x: 0.84, y: 0.68, width: 0.16, height: 0.13 };
 export const DEFAULT_EXP_REGION: CaptureRegion = { x: 0.54921875, y: 0.9569444444, width: 0.08046875, height: 0.0159722222 };
 export const DEFAULT_LEVEL_REGION: CaptureRegion = { x: 0.221875, y: 0.9652777778, width: 0.021484375, height: 0.0180555556 };
+export const DEFAULT_HP_REGION: CaptureRegion = { x: 0.371, y: 0.9569444444, width: 0.052, height: 0.0159722222 };
+export const DEFAULT_MP_REGION: CaptureRegion = { x: 0.459, y: 0.9569444444, width: 0.046, height: 0.0159722222 };
 
 export interface ExpReading { level: number; current: number; percent: number }
 
@@ -141,6 +143,7 @@ export function isGameTrackingConfig(value: unknown): value is GameTrackingConfi
   const c = value as Partial<GameTrackingConfig>;
   return [c.sourceId, c.windowName, c.expWidgetId, c.mesoWidgetId, c.apiVersion].every(v => typeof v === 'string') &&
     validRegion(c.region) && (c.levelRegion === undefined || validRegion(c.levelRegion)) &&
+    (c.hpRegion === undefined || validRegion(c.hpRegion)) && (c.mpRegion === undefined || validRegion(c.mpRegion)) &&
     (c.captureMode === undefined || c.captureMode === 'status-bar') &&
     !!c.priceOverrides && typeof c.priceOverrides === 'object' &&
     !Array.isArray(c.priceOverrides) && Object.values(c.priceOverrides).every(p => Number.isSafeInteger(p) && p >= 0);

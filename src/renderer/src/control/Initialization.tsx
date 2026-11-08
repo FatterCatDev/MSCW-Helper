@@ -6,6 +6,7 @@ export function Initialization(): ReactNode {
   const [sourceId, setSourceId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [debugMode, setDebugMode] = useState(false);
   async function refresh(): Promise<void> {
     setBusy(true); setError('');
     try {
@@ -29,13 +30,15 @@ export function Initialization(): ReactNode {
       </select>
     </label>
     {selected && <img className="initialization-preview" src={selected.image} alt="Selected game window preview" />}
+    <label className="toggle"><input type="checkbox" checked={debugMode} disabled={busy}
+      onChange={e => setDebugMode(e.target.checked)} />Debug mode — show console and estimated recovery-item uses</label>
     <p className="hint">The first confirmed EXP reading establishes your baseline. Capture stays local and is limited to 30 FPS.
       Game-window resolution is detected automatically. EXP is read from the game's bitmap font on every captured frame.
       Status-bar region and layout settings are available from the tray after starting.</p>
     <div className="row-left">
       <button disabled={busy || !selected} onClick={() => {
         setBusy(true); setError('');
-        void window.mscw.initializeGame(sourceId).catch((reason: unknown) => {
+        void window.mscw.initializeGame(sourceId, debugMode).catch((reason: unknown) => {
           setError(reason instanceof Error ? reason.message : String(reason));
         }).finally(() => setBusy(false));
       }}>{busy ? 'Please wait...' : 'Start'}</button>

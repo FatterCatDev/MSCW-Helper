@@ -17,8 +17,6 @@ export const IPC = {
   getGameAssets: 'game-assets:get',
   lookupPotion: 'potions:lookup',
   capturePreviews: 'potions:preview',
-  startPotions: 'potions:start',
-  stopPotions: 'potions:stop',
   startGameTracking: 'game-tracking:start',
   initializeGame: 'game:initialize',
   stopGameTracking: 'game-tracking:stop',
@@ -51,10 +49,8 @@ export interface MscwApi {
   getGameAssets(): Promise<GameAssetImport | null>;
   lookupPotion(itemId: number, version: string): Promise<PotionItem>;
   capturePreviews(): Promise<CapturePreview[]>;
-  startPotions(widgetId: string): Promise<void>;
-  stopPotions(widgetId: string): Promise<void>;
   startGameTracking(): Promise<void>;
-  initializeGame(sourceId: string): Promise<void>;
+  initializeGame(sourceId: string, debugMode?: boolean): Promise<void>;
   stopGameTracking(): Promise<void>;
   captureConfig(): Promise<GameTrackingConfig>;
   captureFrame(image: string, width?: number, height?: number): void;

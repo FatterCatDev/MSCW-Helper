@@ -1,4 +1,4 @@
-import { CAPTURE_INTERVAL_MS, DEFAULT_LEVEL_REGION, MAX_CAPTURE_FPS } from '../../shared/game-tracking.ts';
+import { CAPTURE_INTERVAL_MS, DEFAULT_LEVEL_REGION, DEFAULT_HP_REGION, DEFAULT_MP_REGION, MAX_CAPTURE_FPS } from '../../shared/game-tracking.ts';
 
 async function capture(): Promise<void> {
   const config = await window.mscw.captureConfig();
@@ -17,10 +17,11 @@ async function capture(): Promise<void> {
   let last = -Infinity;
   const frame: VideoFrameRequestCallback = (now) => {
     if (now - last >= CAPTURE_INTERVAL_MS) {
-      canvas.width = 1200; canvas.height = 320;
+      canvas.width = 1200; canvas.height = 640;
       // Black padding is never mistaken for the near-white status digits.
       ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      for (const [index, r] of [config.levelRegion ?? DEFAULT_LEVEL_REGION, config.region].entries()) {
+      for (const [index, r] of [config.levelRegion ?? DEFAULT_LEVEL_REGION, config.region,
+        config.hpRegion ?? DEFAULT_HP_REGION, config.mpRegion ?? DEFAULT_MP_REGION].entries()) {
         const x = Math.round(r.x * video.videoWidth), y = Math.round(r.y * video.videoHeight);
         const width = Math.min(video.videoWidth - x, Math.round(r.width * video.videoWidth));
         const height = Math.min(video.videoHeight - y, Math.round(r.height * video.videoHeight));

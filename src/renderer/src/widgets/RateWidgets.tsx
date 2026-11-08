@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { etaMs, expRateHistory, formatDuration, formatNumber, parseAmount, ratePerHour, rollingPerMinute } from '../../../shared/time.ts';
 import { EntryInput, Stat, type WidgetProps } from './common.tsx';
 import { useNow } from '../common/state.ts';
+import { PotionSelection } from '../common/PotionSelection.tsx';
 
 export function ExpWidget({ w, dispatch }: WidgetProps<'exp'>): ReactNode {
   const { samples, current, required, gained, startedAt, migrated } = w.data;
@@ -112,13 +113,18 @@ export function MesoWidget({ w, dispatch, now, potionStatus }: WidgetProps<'meso
         <Stat label="Tracking" value={automatic || first ? formatDuration(elapsed, true) : '—'} />
         {automatic && <><Stat label="Meso pickups" value={formatNumber(w.data.pickups)} /><Stat label="Loot value (est.)" value={formatNumber(lootValue)} /></>}
         <Stat label="Potion cost (est.)" value={formatNumber(w.data.potionCosts)} className="bad" />
+        <Stat label="Identified recoveries (est.)" value={formatNumber(Object.values(w.data.potionUses).reduce((a, b) => a + b, 0))} />
+        <Stat label="Unidentified recoveries" value={formatNumber(w.data.unidentifiedRecoveries)} />
         <Stat label="Farming net (est.)" value={automatic || first ? formatNumber(gained - w.data.potionCosts) : '—'} />
         {!automatic && goal > 0 && <Stat label="Goal ETA" value={last && last.value >= goal ? 'Reached!' : eta === null ? '—' : formatDuration(eta, true)} />}
       </div>
       {w.data.loot.some(item => item.unitValue === null) && <p className="hint">Unvalued loot excluded. Set prices in Settings.</p>}
       {automatic && <p className="hint">Retained previous notification totals. Automatic meso/loot tracking is currently disabled.</p>}
-      <button className="ghost" onClick={() => window.mscw.openControl(w.id)}>Configure potion detection</button>
-      {w.config.potions.length > 0 && <p className="hint">{potionStatus?.message ?? 'Potion detection stopped.'}</p>}
+      <PotionSelection selected={w.config.selectedPotions} onChange={selectedPotions =>
+        dispatch({ type: 'widget/config', id: w.id, config: { selectedPotions } })} />
+      <button className="ghost" onClick={() => window.mscw.openControl(w.id)}>Configure recovery tracking</button>
+      <p className="hint">{w.config.selectedPotions.hp === null && w.config.selectedPotions.mp === null ? 'No potions selected; potion tracking disabled.' :
+        potionStatus?.message ?? 'Waiting for game capture; recovery tracking starts automatically.'}</p>
       {!automatic && goal > 0 && last && (
         <div className="bar">
           <div className="bar-fill" style={{ width: `${Math.min(100, (last.value / goal) * 100)}%` }} />

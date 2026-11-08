@@ -1,5 +1,6 @@
 import type { PotionItem } from '../shared/types.ts';
 import { itemNameDistance } from '../shared/game-tracking.ts';
+import { NPC_RECOVERY_ITEMS, NPC_RECOVERY_PRICE_SOURCE } from '../shared/npc-recovery-prices.ts';
 
 function object(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -17,12 +18,13 @@ export function parsePotionItem(value: unknown): PotionItem {
   return {
     id: Number(item.id), name: description.name,
     description: typeof description.description === 'string' ? description.description.replaceAll('\\n', '\n') : '',
-    npcSellPrice: typeof meta?.price === 'number' && Number.isFinite(meta.price) ? meta.price : null
+    npcSellPrice: typeof meta?.price === 'number' && Number.isFinite(meta.price) ? meta.price : null,
+    npcBuyPrice: NPC_RECOVERY_ITEMS[Number(item.id)]?.npcBuyPrice ?? null,
+    npcPriceSource: NPC_RECOVERY_ITEMS[Number(item.id)]?.npcBuyPrice != null ? NPC_RECOVERY_PRICE_SOURCE : null
   };
 }
 
 const cache = new Map<string, PotionItem>();
-
 const lootCache = new Map<string, { id: number; price: number }>();
 
 export async function lookupLoot(name: string, version: string): Promise<{ id: number; price: number }> {
@@ -64,6 +66,14 @@ export async function lookupPotion(itemId: unknown, version: unknown): Promise<P
     throw new Error('Enter a positive item ID and a valid GMS API version.');
   }
   const key = `${version}/${itemId}`;
+  const local = NPC_RECOVERY_ITEMS[itemId];
+  if (local) return {
+    id: itemId, name: local.name,
+    description: `Classic recovery: ${local.hp} HP / ${local.mp} MP.` +
+      (local.availability === 'not-open' ? ' The listed NPC shops are not open in this release.' : ''),
+    npcSellPrice: null, npcBuyPrice: local.npcBuyPrice,
+    npcPriceSource: local.npcBuyPrice !== null ? NPC_RECOVERY_PRICE_SOURCE : null
+  };
   const cached = cache.get(key);
   if (cached) return cached;
   const response = await fetch(`https://maplestory.io/api/GMS/${version}/item/${itemId}`, { signal: AbortSignal.timeout(15000) });

@@ -219,7 +219,7 @@ function AboutTab(): ReactNode {
       </ul>
       <h3>Roadmap</h3>
       <ul>
-        <li>Automatic gain-notification and potion OCR are experimental; verify compatibility with the game's rules.</li>
+        <li>Automatic EXP and HP/MP recovery estimates are experimental; verify compatibility with the game's rules.</li>
       </ul>
     </div>
   );

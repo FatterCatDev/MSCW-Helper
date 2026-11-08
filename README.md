@@ -34,6 +34,7 @@ You can add multiple widgets of each type.
 ## Using it
 
 - **Initialization** – the only window shown on launch. Choose the game window and click **Start** to begin automatic tracking and show the overlay. Closing Initialization quits the app. A game must be selected each launch.
+- **Debug mode** – an optional Initialization checkbox shows a movable, resizable debug overlay with recent console messages, HP/MP readings and estimated recovery-item use totals. It is off by default and only lasts for the current app session. The console keeps the latest 200 entries in memory; it does not save screenshots or logs.
 - **Control panel** – available from the tray after Start. Closing it keeps the app running in the tray. Click the tray icon to reopen it, or right-click it for quick toggles and Quit.
 - **Edit layout** (`Ctrl+Shift+F2`) – drag widgets by any part and resize them from the edges. The ⚙ button opens a widget's settings, ✕ hides it in this layout, and the toolbar adds or re-shows widgets.
 - **Layouts** – each layout remembers which widgets are visible plus their position, size, opacity and scale. Widget data (notes, counters, timers) is shared between layouts. Switch layouts from the toolbar, the tray, or `Ctrl+Shift+F5`.
@@ -64,13 +65,16 @@ To adjust tracking afterward:
 
 Defaults are based on the supplied 2560x1440 video. Old notification crops
 migrate to the new defaults; adjust both regions for different resolutions/UI
-placements. HP/MP gauges are not tracked in this step.
+placements. HP/MP current/max numbers also feed the optional recovery tracker.
 
 Live capture uses a window-specific video stream. The game can move on the
 desktop without changing capture coordinates. The overlay remains positioned
 by the existing layout/display settings; no injection or memory access is used.
 Window previews enumerate capturable windows; live EXP capture selects only the
-chosen window. If the game closes, capture ends; select it again after relaunch.
+chosen window. When the selected game window closes, MSCW Helper automatically
+quits and saves its state. Window lifetime is checked about once per second,
+independently of EXP/potion tracking, including when tracking is stopped.
+Relaunch MSCW Helper and select the game again for a new session.
 Minimized/static windows may stop producing frames, and the UI reports zero FPS
 after three seconds without a fresh frame.
 
@@ -157,34 +161,70 @@ other widgets and layout settings are preserved.
 
 Select a **Meso Tracker** in the control panel:
 
-1. Enter a MapleStory.io GMS version and potion item ID, then **Look up potion**.
-   For example, `62` / `2000000` returns Red Potion. GMS 62 is a reference dataset,
-   not a verified MSCW match. Only the requested ID/version is sent to the API.
-2. **Add potion**, then enter your actual purchase cost per potion. The API's
-   NPC sell price is shown for reference, not assumed to be the purchase price.
-3. **Select count region** takes a local still window preview. Choose the game and
-   drag tightly around only the quantity digits for that potion, then save.
-4. **Start potion detection**. Keep those quantities visible and uncovered, and
-   keep the inventory in the same position inside the game window. Up to eight non-overlapping
-   regions can be monitored in one Meso Tracker at a time.
+Hotkey icon/quantity detection has been removed. Potion use is now estimated from
+changes to the bottom HP/MP current/max numbers, using the same bitmap-font video
+capture as EXP (up to 30 FPS, no screenshot uploads).
 
-OCR and its bundled English recognition data run locally with no screenshot
-uploads or saved frame history. Windows are captured in memory; only selected
-crops are passed to OCR. Readings run sequentially, with a 1.5-second pause after
-each batch. Two consecutive matching readings with confidence at least 85 are
-required. A confirmed decrease of one adds the configured cost exactly once.
-Unreadable digits reset the baseline; increases rebaseline as restocks and larger
-decreases are reported as ambiguous without a charge. Fast uses, zero/hidden
-quantities and unreadable frames can therefore be missed.
+1. In **Settings -> Automatic game-window tracking**, stop capture if needed,
+   refresh the preview and select **HP current/max numbers** and **MP current/max
+   numbers**. Select the complete numeric field, such as `[1084/1995]`, excluding
+   the HP/MP label and coloured gauge. Save each region and restart capture.
+2. In the overlay **Meso Tracker**, use the **HP recovery** and **MP recovery**
+   icon dropdowns to select one item for each stat. Only items restoring that stat
+   appear in its dropdown. Item names and base recovery amounts are available in
+   tooltips; verified item icons come from MapleStory.io (GMS v62) and require a connection.
+   Classic and GMS item IDs differ, so icons use a separate mapping. Items without
+   a verified GMS icon show `?` rather than an unrelated icon.
+   The same dropdowns are available in configuration. Choose the empty dashed
+   icon to clear either slot. Leave both blank to disable potion tracking; existing totals remain.
+   Combined HP/MP items can occupy either or both slots and are counted once.
+   A stat with no selected item restoring it does not generate recovery events.
+   Saved prices do not select items automatically.
+3. Recovery tracking starts automatically once game capture is running and at
+   least one item is selected. No job or skill setup is needed. The first valid reading
+   establishes a baseline; unchanged frames do not add events.
 
-**This cannot distinguish use from selling, dropping, trading or moving potions.**
-Stop detection before managing inventory. Costs and farming net are estimates,
-not changes to your recorded wallet. Purchases may already be reflected in wallet
-readings, so subtracting replacement costs can double-count expenses in that case.
-Resetting the Meso Tracker also clears potion costs; **Reset potion costs** clears
-only those costs. Changing potion settings stops detection. Detection is off on
-startup and must be explicitly started each session.
-Old display-based potion regions need to be selected again as window regions.
+An observed HP or MP increase counts when it is within **50% to 150%**
+of a selected item's base recovery, inclusive. For example, Lemon's 150 MP
+matches increases from 75 through 225 MP. Increases of 10 or less and
+out-of-range changes are ignored. Separate selected HP and MP items can each
+trigger from the same frame; a combined item matching both stats counts once.
+Unique matches count an estimated use and charge the NPC/manual purchase cost.
+Items with unknown prices are counted but remain uncharged.
+
+Different items can share amounts: Red Potion and a Daydream both restore 100 HP;
+Blue Potion and Salad both restore 200 MP. Selecting only the item you use removes
+ambiguity from unselected look-alikes. If multiple selected items could explain
+an observation, it is unidentified and uncharged. Use **Review uncharged recovery events** to identify an item
+you know was consumed and record its cost once. Only the latest 200 events are
+retained for review; total use/cost/unidentified counters persist.
+
+**HP/MP changes cannot prove potion use.** Healing skills, natural regeneration,
+damage between frames and several recoveries between frames can produce the same
+observed change. Known regeneration rates are not subtracted or invented. At a
+stat cap, the full recovery is unknown; an observed increase within the range
+still counts as requested and may be a false positive. Unreadable fields, gaps over one second,
+death and changes to maximum stats establish a fresh baseline without a charge.
+Recovery during these interruptions can be missed. HP and MP must both be readable.
+
+Price overrides remain available under **Recovery item prices and estimated
+counts**. Old item IDs, manual prices and past expenses are preserved; old hotkey
+and count-region metadata is discarded. Resetting the Meso Tracker clears recovery
+events/costs; **Reset potion costs and recovery events** leaves wallet samples alone.
+Old multi-item selections migrate to the first eligible item in each stat dropdown.
+Changing prices or potion selection establishes a fresh baseline.
+Clearing both selections or stopping game capture stops recovery
+tracking; it resumes automatically when the prerequisites are met again.
+Farming net is an estimate, not a wallet deduction.
+
+The bundled database, `src/shared/npc-recovery-prices.ts`, contains 33 recovery
+items listed in [NiaDB's Classic NPC consumable tables](https://meowdb.com/msclassic/npc-shops/item-efficiency/consumables),
+checked November 7, 2026: 29 with shop purchase prices and four with shops marked
+not open in this release. It includes HP/MP potions, recovery food and recovery
+Daydream items, keyed by original MapleStory item ID (not NiaDB's page ID).
+This is a dated snapshot, not a complete list of every obtainable recovery item.
+Missing items, including recovery drops without listed NPC sellers, have no
+verified NPC purchase price. No NiaDB requests run during normal app use.
 
 ### Tips
 

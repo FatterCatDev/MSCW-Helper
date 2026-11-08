@@ -5,8 +5,9 @@ import { bossNextAt, dailyKey, nextScheduled } from '../../../shared/time.ts';
 import { WIDGET_TYPES, type AppState, type Placement, type PotionStatus, type WidgetDef, type WidgetType } from '../../../shared/types.ts';
 import { beep, useAppState, useNow, type Dispatch } from '../common/state.ts';
 import { WidgetContent } from '../widgets/index.tsx';
+import { DebugWidget } from './DebugWidget.tsx';
 
-const INTERACTIVE = '.widget-rnd, [data-interactive]';
+const INTERACTIVE = '.widget-rnd, .debug-rnd, [data-interactive]';
 const EDITABLE = 'input:not([type=checkbox]):not([type=range]):not([type=button]), textarea, select';
 
 /** Lets clicks on empty overlay space fall through to the game; only widgets capture the mouse. */
@@ -225,6 +226,7 @@ export function OverlayApp(): ReactNode {
         {!state.runtime.gameTracking.running && ' (stopped)'}
       </div>}
       {edit && <EditToolbar state={state} dispatch={dispatch} />}
+      {state.runtime.debugMode && <DebugWidget runtime={state.runtime} />}
       {profile &&
         state.widgetOrder.map((id, i) => {
           const w = state.widgets[id];

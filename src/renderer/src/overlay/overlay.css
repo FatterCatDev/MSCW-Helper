@@ -23,6 +23,21 @@ body.overlay-body,
   pointer-events: none;
 }
 
+.debug-widget {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 18, 24, 0.94);
+  color: #eee;
+  border: 1px solid #64748b;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.debug-title { padding: 8px 12px; background: #293241; cursor: move; font-weight: bold; }
+.debug-potions { padding: 8px 12px; max-height: 130px; overflow: auto; font-size: 12px; }
+.debug-console { flex: 1; margin: 0; padding: 8px 12px; overflow: auto; white-space: pre-wrap; font-size: 11px; user-select: text; }
+
 .exp-entry {
   display: grid;
   grid-template-columns: 1fr 1fr;
